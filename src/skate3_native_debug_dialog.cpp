@@ -432,13 +432,13 @@ void DrawFreecamControls() {
   REXCVAR_SET(skate3_native_render_scene_freecam_speed,
               CvarSlider("fly speed (m/s)",
                          REXCVAR_GET(skate3_native_render_scene_freecam_speed),
-                         0.5f, 60.0f, "%.1f",
+                         0.5f, 100.0f, "%.1f",
                          "Base fly speed; Shift = 4x, Ctrl = 0.2x"));
   REXCVAR_SET(
       skate3_native_render_scene_freecam_look_speed,
       CvarSlider("look speed (deg/s)",
                  REXCVAR_GET(skate3_native_render_scene_freecam_look_speed),
-                 20.0f, 240.0f, "%.0f", "Arrow-key look rate"));
+                 20.0f, 360.0f, "%.0f", "Arrow-key look rate"));
   ImGui::TextDisabled(
       "WASD fly, E/Space up, Q/C down, arrows or right-mouse drag look,\n"
       "Z/X zoom, Shift fast, Ctrl slow.");
@@ -708,7 +708,7 @@ void DrawLightingPostSection() {
   REXCVAR_SET(skate3_native_render_scene_haze_intensity,
               CvarSlider("haze intensity",
                          REXCVAR_GET(skate3_native_render_scene_haze_intensity),
-                         0.0f, 0.5f, "%.3f"));
+                         0.0f, 0.6f, "%.3f"));
   REXCVAR_SET(skate3_native_render_scene_haze_density,
               CvarSlider("haze density (1/unit)",
                          REXCVAR_GET(skate3_native_render_scene_haze_density),
@@ -843,19 +843,6 @@ void DrawWeatherSection() {
   ImGui::TextDisabled("%s", kNeverHint);
 
   ImGui::Separator();
-  ImGui::TextUnformatted("Sun override");
-  REXCVAR_SET(skate3_native_render_scene_sun_override,
-              CvarCheckbox("Sun override", REXCVAR_GET(skate3_native_render_scene_sun_override),
-                           "Replace the captured sun direction with azimuth/elevation."));
-  if (REXCVAR_GET(skate3_native_render_scene_sun_override)) {
-    REXCVAR_SET(skate3_native_render_scene_sun_azimuth,
-                CvarSlider("sun azimuth (deg)", REXCVAR_GET(skate3_native_render_scene_sun_azimuth),
-                           0.0f, 360.0f, "%.0f"));
-    REXCVAR_SET(skate3_native_render_scene_sun_elevation,
-                CvarSlider("sun elevation (deg)", REXCVAR_GET(skate3_native_render_scene_sun_elevation),
-                           2.0f, 88.0f, "%.0f",
-                           "Low elevations give long shadows and the most visible shafts."));
-  }
   // Sun/scene brightness: standalone (works with sun override off) so you can
   // dim the whole scene toward night regardless of the direction override.
   REXCVAR_SET(skate3_native_render_scene_sun_brightness,
@@ -863,18 +850,6 @@ void DrawWeatherSection() {
                          0.0f, 5.0f, "%.2f",
                          "1.0 = captured look; <1.0 dims the world/props/sky/"
                          "characters toward night. The Night preset sets ~0.15."));
-
-  ImGui::Separator();
-  ImGui::TextUnformatted("Haze");
-  REXCVAR_SET(skate3_native_render_scene_haze,
-              CvarCheckbox("Directional haze", REXCVAR_GET(skate3_native_render_scene_haze),
-                           "Fog-tinted sun scattering added with view distance."));
-  REXCVAR_SET(skate3_native_render_scene_haze_intensity,
-              CvarSlider("haze intensity", REXCVAR_GET(skate3_native_render_scene_haze_intensity),
-                         0.0f, 0.5f, "%.3f"));
-  REXCVAR_SET(skate3_native_render_scene_haze_density,
-              CvarSlider("haze density (1/unit)", REXCVAR_GET(skate3_native_render_scene_haze_density),
-                         0.0f, 0.02f, "%.4f"));
 }
 
 void DrawShadowsSection() {

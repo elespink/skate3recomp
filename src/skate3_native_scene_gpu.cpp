@@ -182,6 +182,26 @@ void RetireGuestTexture(const GuestTexture& t) {
   g_r.device->DestroyDeferred(t.srv);
 }
 
+// ---- F3: shadow-pass bone-palette reuse cache -------------------------------
+// Dynamic shadow casters memcpy their skinned bone palette into the per-frame
+// bone ring in RenderShadowAtlas (the SHADOW pass). The main pass re-uploads
+// the SAME item.bones to the SAME ring for every skinned item it draws. This
+// is pure duplication: both passes run inside the SAME RenderScene frame on
+// the SAME immutable DrawItem objects (scene.items is a stable vector), the
+// bone ring is a persistently-mapped upload buffer (CPU writes are visible to
+// every draw in the submitted command list), and RenderScene calls
+// RenderShadowAtlas BEFORE the main draw_item loop. So by the time the main
+// pass binds the bone SRV for an item, the shadow pass has already written
+// that item's bones at the cached offset. The main pass reuses that offset and
+// SKIPS the second memcpy. Keyed on the DrawItem* identity (many instances
+// share a mesh but carry distinct poses; mesh alone would collide). Cleared
+// once per frame at the bone-ring reset in RenderScene. Render-thread only.
+struct F3ShadowBoneEntry {
+  const DrawItem* item;
+  uint32_t offset;
+};
+static std::vector<F3ShadowBoneEntry> g_f3_shadow_bones;
+
 // ---- Content store helpers --------------------------------------------------
 // The store is words-keyed; the guest
 // streamer's object retargeting (mip flap A<->B, detail demote, object
@@ -6570,6 +6590,10 @@ bool RenderShadowAtlas(const NativeGuestOutputRenderContext& context,
         g_r.bone_ring_offset = offset + bytes;
         c.bone_offset = offset;
         c.bones = true;
+        // F3: publish this item's ring offset so the MAIN pass can reuse it
+        // instead of duplicating the identical bone palette later this frame
+        // (same item, same immutable scene.items, shadow pass runs first).
+        g_f3_shadow_bones.push_back(F3ShadowBoneEntry{&item, offset});
       }
       casters.push_back(c);
     }
@@ -7706,6 +7730,9 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
       RendererState::kBoneRegionSize;
   g_r.bone_ring_offset = 0;
   g_r.ropa_ring_offset = 0;
+  // F3: the shadow-bone reuse cache is per-frame; both passes allocate from
+  // the same ring region below this reset, so drop last frame's entries.
+  g_f3_shadow_bones.clear();
 
   {
     const std::string tm(REXCVAR_GET(skate3_native_render_scene_trace_mesh));
@@ -8852,12 +8879,36 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
     // Bone palette upload for skinned items; tint.g flags skinning.
     bool bones_bound = false;
     if (item.skinned && !item.bones.empty()) {
-      const uint32_t bytes = uint32_t(item.bones.size() * sizeof(float));
-      const uint32_t offset = (g_r.bone_ring_offset + 255u) & ~255u;
-      if (offset + bytes <= RendererState::kBoneRegionSize) {
-        std::memcpy(g_r.bone_ring_cpu + bone_region + offset, item.bones.data(), bytes);
-        g_r.bone_ring_offset = offset + bytes;
-        cmd->SetBufferSrv(3, g_r.bone_ring, bone_region + offset);
+      // F3: if the SHADOW pass already uploaded THIS item's (identical,
+      // immutable) bones to the ring earlier in this same RenderScene frame,
+      // reuse that published offset instead of the redundant second memcpy.
+      // The cache is keyed on the DrawItem* identity and was cleared at the
+      // frame's bone-ring reset; only skinned main-pass items reach this scan,
+      // and the shadow castees set is small (characters/vehicles). The binding
+      // below reads the already-written region (this pass runs after the
+      // shadow pass), so no data is duplicated and no ring space is wasted.
+      uint32_t bound_offset = 0;
+      bool reused = false;
+      for (const F3ShadowBoneEntry& e : g_f3_shadow_bones) {
+        if (e.item == &item) {
+          bound_offset = e.offset;
+          reused = true;
+          break;
+        }
+      }
+      if (!reused) {
+        const uint32_t bytes = uint32_t(item.bones.size() * sizeof(float));
+        const uint32_t offset = (g_r.bone_ring_offset + 255u) & ~255u;
+        if (offset + bytes <= RendererState::kBoneRegionSize) {
+          std::memcpy(g_r.bone_ring_cpu + bone_region + offset,
+                      item.bones.data(), bytes);
+          g_r.bone_ring_offset = offset + bytes;
+          bound_offset = offset;
+          reused = true;
+        }
+      }
+      if (reused) {
+        cmd->SetBufferSrv(3, g_r.bone_ring, bone_region + bound_offset);
         bones_bound = true;
       }
     }

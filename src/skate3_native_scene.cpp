@@ -6793,9 +6793,9 @@ void InterpolateDynamicItems(uint8_t* base, FrameScene& scene, double now) {
   // pushes the play clock ~(W/2 + period) back AND the entity boxcar
   // (below) reaches another W/2 past that (~55 ms total at the default
   // 50 ms window). With ingests spaced at least kMinDynIngestSpacing apart,
-  // 24 slots guarantee >= ~80 ms of coverage at ANY render rate. The shared
-  // g_smooth_play keeps entities in phase with the camera.
-  constexpr int kRing = 24;
+  // 32 slots guarantee >= ~110 ms of coverage at ANY render rate. The
+  // shared g_smooth_play keeps entities in phase with the camera.
+  constexpr int kRing = 32;
   struct DynPose {
     double t = 0.0;
     std::vector<float> b;  // bone palette (skinned), raw captured rows
