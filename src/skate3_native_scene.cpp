@@ -1035,11 +1035,13 @@ REXCVAR_DEFINE_BOOL(skate3_native_render_scene_tex_revalidate, true, "Skate 3",
                     "Re-fingerprint cached texture payloads every 16 frames and "
                     "re-decode on change (heals late-composed lightmap pages)")
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
-REXCVAR_DEFINE_BOOL(skate3_native_render_scene_stretch_guard, true, "Skate 3",
+REXCVAR_DEFINE_BOOL(skate3_native_render_scene_stretch_guard, false, "Skate 3",
                     "Draw-time stretch veto: skin cached sample verts of each "
                     "skinned mesh's GPU-resident decode with the final palette "
                     "every frame; wider than bind size = the 1-frame mangled-"
-                    "ribbon flash; skip the item's draws (blink)")
+                    "ribbon flash; skip the item's draws (blink). OFF by "
+                    "default in release to avoid the per-frame CPU cost; "
+                    "re-enable via F12 if a mangled-ribbon artifact is seen.")
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DEFINE_BOOL(skate3_native_render_scene_stretch_guard_dump, false, "Skate 3",
                     "On a stretch veto, dump the full bone palette and probe "

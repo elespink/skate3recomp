@@ -38,6 +38,7 @@ REXCVAR_DECLARE(bool, skate3_native_render_scene_quadlists);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_world_items);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_dynamic_items);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_nude);
+REXCVAR_DECLARE(double, skate3_native_render_scene_character_size);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_lw_fade);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_lw_identity);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_lw_gap_fill);
@@ -982,6 +983,13 @@ void DrawSceneContentSection() {
                            "Suppress Ropa cloth-sim garments (player tees, NPC "
                            "jackets, hair_ropa) so skaters render as just their "
                            "skin/body layer"));
+  REXCVAR_SET(
+      skate3_native_render_scene_character_size,
+      CvarSlider("character size",
+                 REXCVAR_GET(skate3_native_render_scene_character_size),
+                 0.1f, 5.0f, "%.2f",
+                 "Uniform scale multiplier for skater/NPC characters "
+                 "(char_family 1/2). 1.0 = normal, 2.0 = double."));
   REXCVAR_SET(
       skate3_native_render_scene_lw_fade,
       CvarCheckbox("LW entity fade (store)",

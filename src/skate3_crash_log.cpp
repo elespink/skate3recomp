@@ -434,32 +434,34 @@ void Install() {
     return;
   }
 
-  // Open crash sinks: primary in the build dir (next to the executable, where
-  // the user launched from) and a discoverable mirror in the user data root
-  // (beside settings.toml / saves, the natural place to look on crash).
-  // Each sink is independent: if one fails, the other still works.
-  std::filesystem::path primary_path =
-      rex::filesystem::GetAppRootFolder() / "crash_log.txt";
-  FILE* pf = std::fopen(primary_path.string().c_str(), "w");
-  if (pf != nullptr) {
-    g_crash_fd = pf;
-  } else {
-    REXLOG_WARN("crashlog: could not open {} for crash output",
-                primary_path.string());
-  }
-
+  // Open crash sinks: primary in the user data root (beside settings.toml /
+  // saves, the natural place to look on crash) and a mirror next to the
+  // executable (where the user launched from). Each sink is independent:
+  // if one fails, the other still works.
   const std::filesystem::path user_dir =
       rex::filesystem::GetUserFolder() / "skate3";
+  std::filesystem::path primary_path;
+  FILE* pf = nullptr;
   if (!user_dir.empty()) {
     std::filesystem::create_directories(user_dir);
-    const std::filesystem::path mirror_path = user_dir / "crash_log.txt";
-    FILE* mf = std::fopen(mirror_path.string().c_str(), "w");
-    if (mf != nullptr) {
-      g_crash_fd_mirror = mf;
+    primary_path = user_dir / "crash_log.txt";
+    pf = std::fopen(primary_path.string().c_str(), "w");
+    if (pf != nullptr) {
+      g_crash_fd = pf;
     } else {
-      REXLOG_WARN("crashlog: could not open {} for crash mirror",
-                  mirror_path.string());
+      REXLOG_WARN("crashlog: could not open {} for crash output",
+                  primary_path.string());
     }
+  }
+
+  const std::filesystem::path mirror_path =
+      rex::filesystem::GetAppRootFolder() / "crash_log.txt";
+  FILE* mf = std::fopen(mirror_path.string().c_str(), "w");
+  if (mf != nullptr) {
+    g_crash_fd_mirror = mf;
+  } else {
+    REXLOG_WARN("crashlog: could not open {} for crash mirror",
+                mirror_path.string());
   }
 
   if (pf == nullptr && (g_crash_fd_mirror == nullptr)) {
@@ -492,9 +494,9 @@ void Install() {
   }
 
   const char* sink_list = (g_crash_fd && g_crash_fd_mirror)
-                              ? "two sinks (build dir + user root)"
-                              : (g_crash_fd ? "primary (build dir)" : "mirror "
-                                                             "(user root)");
+                              ? "two sinks (user root + build dir)"
+                              : (g_crash_fd ? "primary (user root)" : "mirror "
+                                                              "(build dir)");
   REXLOG_INFO("crashlog: crash reports will be written to {}", sink_list);
 
 #if defined(__linux__) || defined(__APPLE__)

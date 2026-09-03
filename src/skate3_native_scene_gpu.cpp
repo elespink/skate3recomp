@@ -6874,6 +6874,15 @@ bool RenderShadowAtlas(const NativeGuestOutputRenderContext& context,
         }
         float constants[52] = {};
         std::memcpy(constants, item.world, sizeof(item.world));
+        if ((item.char_family == 1 || item.char_family == 2)) {
+          const float cs = float(REXCVAR_GET(
+              skate3_native_render_scene_character_size));
+          if (cs != 1.0f) {
+            for (int i = 0; i < 12; ++i) {
+              constants[i] *= cs;
+            }
+          }
+        }
         float* mvp = constants + 16;
         for (int r = 0; r < 4; ++r) {
           for (int col = 0; col < 4; ++col) {
@@ -8806,6 +8815,17 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
     }
     float constants[52] = {};
     std::memcpy(constants, item.world, sizeof(item.world));
+    // Character size scaling: scale skater/NPC 3x3 linear rows (world[0..11])
+    // for char_family 1/2 items when the multiplier is not 1.0.
+    if ((item.char_family == 1 || item.char_family == 2)) {
+      const float cs = float(REXCVAR_GET(
+          skate3_native_render_scene_character_size));
+      if (cs != 1.0f) {
+        for (int i = 0; i < 12; ++i) {
+          constants[i] *= cs;
+        }
+      }
+    }
     if (item.unlit) {
       // sky.*: the dome mesh is CAMERA-RELATIVE (sky.fx defaultVS adds
       // g_vViewPos to every vertex). Anchoring it at the world origin put
