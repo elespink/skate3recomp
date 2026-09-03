@@ -645,6 +645,8 @@ void DrawImageQualitySection() {
                            "gradients."));
 }
 
+void SeedSunFromCaptured();
+
 void DrawLightingPostSection() {
   REXCVAR_SET(skate3_native_render_scene_hdr,
               CvarCheckbox("HDR intermediate",
@@ -744,18 +746,7 @@ void DrawLightingPostSection() {
                      "shade and the sky dome's painted sun stay put (game "
                      "content).");
     if (now_on && !was_on) {
-      // Seed the sliders from the captured sun so enabling the override
-      // starts at the true position instead of jumping.
-      float sun[3];
-      skate3::native_scene::GetCapturedSunDir(sun);
-      const float kRad = 57.29577951f;
-      REXCVAR_SET(skate3_native_render_scene_sun_azimuth,
-                  double(std::fmod(std::atan2(sun[0], sun[2]) * kRad + 360.0f,
-                                   360.0f)));
-      REXCVAR_SET(
-          skate3_native_render_scene_sun_elevation,
-          double(std::clamp(std::asin(std::clamp(sun[1], -1.0f, 1.0f)) * kRad,
-                            2.0f, 88.0f)));
+      SeedSunFromCaptured();
     }
     REXCVAR_SET(skate3_native_render_scene_sun_override, now_on);
   }

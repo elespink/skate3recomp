@@ -2006,6 +2006,9 @@ bool BuildItemFromMesh(uint8_t* base, uint32_t mesh, DrawItem& item) {
     g_rej_chain.fetch_add(1, std::memory_order_relaxed);
     return false;
   }
+  // Pre-size the island draw list: both cold consumers (BuildItemGeometry's
+  // ctx draw list, the gpu prewarm's single-drop entry) push into draws.
+  item.draws.reserve(32);
 
   // Vertex descriptor: find the stream-0 position element and the first
   // stream-0 texcoord (D3DDECLUSAGE 5) for the diffuse map. Read via ONE
@@ -3911,12 +3914,64 @@ int ScoreRigidAffine(uint8_t* base, uint32_t bank, uint32_t m, const DrawItem& i
 // ribbon flash. 32 evenly-spaced samples cover the islands the 6-vert
 // gates miss. Returns the measured spread via out_spread for the
 // diagnosis log.
+namespace {
+// Per-frame memo for the same item judged more than once in a frame (a mesh
+// cloned/duplicated across instances with an identical pose + layout reads
+// the SAME skin samples): skip the guest re-read for an identical verdict.
+// The verdict depends only on these inputs (all that gates skin sampling
+// plus the bone content driving the spread), and the table is cleared each
+// frame so a CPU-rewritten VB or new pose is always re-judged.
+struct PalSaneKey {
+  uint32_t vb_addr, vb_bytes, stride;
+  uint16_t bw_offset, bi_offset, pos_offset;
+  uint8_t pos_fmt;
+  size_t bone_n;
+  uint64_t bone_hash;
+  bool operator==(const PalSaneKey&) const = default;
+};
+struct PalSaneKeyHash {
+  size_t operator()(const PalSaneKey& k) const noexcept {
+    size_t h = 14695981039346656037ull;
+    const auto mix = [&](uint64_t v) { h ^= v; h *= 1099511628211ull; };
+    mix(k.vb_addr); mix(k.vb_bytes); mix(k.stride); mix(k.bw_offset);
+    mix(k.bi_offset); mix(k.pos_offset); mix(k.pos_fmt);
+    mix(uint64_t(k.bone_n)); mix(k.bone_hash);
+    return h;
+  }
+};
+struct PalSaneMemo {
+  bool sane;
+  float spread;
+};
+static thread_local std::unordered_map<PalSaneKey, PalSaneMemo, PalSaneKeyHash>
+    s_pal_sane_memo;
+static thread_local uint64_t s_pal_sane_frame = ~0ull;
+}  // namespace
 bool PublishedPaletteSane(uint8_t* base, const DrawItem& item,
                           float* out_spread) {
   *out_spread = 0.0f;
   if (item.stride == 0 || item.bones.size() < 12 || item.bw_offset == 0 ||
       item.bi_offset == 0 || item.vb_addr == 0) {
     return true;
+  }
+  if (s_pal_sane_frame != g_guest_frame) {
+    s_pal_sane_memo.clear();
+    s_pal_sane_frame = g_guest_frame;
+  }
+  const size_t bone_n = item.bones.size();
+  uint64_t bone_hash = 14695981039346656037ull;
+  for (const float f : item.bones) {
+    uint32_t u;
+    std::memcpy(&u, &f, sizeof(u));
+    bone_hash ^= u;
+    bone_hash *= 1099511628211ull;
+  }
+  PalSaneKey key{item.vb_addr, item.vb_bytes, item.stride, item.bw_offset,
+                 item.bi_offset, item.pos_offset, item.pos_fmt, bone_n,
+                 bone_hash};
+  if (const auto fit = s_pal_sane_memo.find(key); fit != s_pal_sane_memo.end()) {
+    *out_spread = fit->second.spread;
+    return fit->second.sane;
   }
   const float bind_diag = BindDiag(item);
   // 6x, NOT the capture gates' 3x: this judges already-ACCEPTED palettes,
@@ -3928,15 +3983,19 @@ bool PublishedPaletteSane(uint8_t* base, const DrawItem& item,
   constexpr uint32_t kSamples = 32;
   SkinSampleVert sverts[kSamples];
   if (!ReadSkinSamplesGuest(base, item, kSamples, sverts)) {
-    return true;  // unsupported position format: nothing to judge
+    s_pal_sane_memo[key] = {true, 0.0f};  // unsupported format: nothing to judge
+    return true;
   }
   float spread = 0.0f;
   if (SkinnedSpreadHostRows(sverts, kSamples, item.bones.data(), item.bones.size(),
                             /*min_n=*/4, /*garbage_fails=*/false, &spread) != 1) {
-    return true;  // nothing to judge
+    s_pal_sane_memo[key] = {true, 0.0f};  // nothing to judge
+    return true;
   }
+  const bool sane = spread <= max_spread;
+  s_pal_sane_memo[key] = {sane, spread};
   *out_spread = spread;
-  return spread <= max_spread;
+  return sane;
 }
 
 // Returns false when the bank could not be consumed for this item (ropa
@@ -7369,10 +7428,15 @@ void InterpolateDynamicItems(uint8_t* base, FrameScene& scene, double now) {
     // render-rate pose alternation reads as skater judder/ghosting against
     // the smooth background. Averaging bone affines componentwise over the
     // window slightly shrinks fast-swinging limb rotations (a subtle motion
-    // blur), the trade the game's own 60 Hz presentation makes anyway.
-    const double filter_w = std::clamp(
+    // blur), the trade the game's own 60 Hz presentation makes anyway. The
+    // window adapts to the entity's OWN pose-change period: slow-ticking
+    // park characters (~30 Hz class) get a window spanning ~3 of their own
+    // steps; 60 Hz entities keep the camera-base window unchanged.
+    const double base_w = std::clamp(
         REXCVAR_GET(skate3_native_render_scene_smooth_camera_filter_ms), 0.0, 200.0) *
         1e-3;
+    const double filter_w =
+        std::clamp(base_w + (h.period > 0.0 ? h.period * 2.0 : 0.0), 0.0, 0.20);
     // Per-entity playback point. Entities whose own pose stream is SLOWER
     // than the 60 Hz character cadence (traffic vehicles tick on their own
     // sim rate) pin the shared playback clock past their newest sample;
@@ -9494,7 +9558,8 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
       uint32_t mesh;
       float p[3];
     };
-    std::vector<LivePos> live;
+    static thread_local std::vector<LivePos> live;
+    live.clear();
     live.reserve(16);
     for (const DrawItem& it : scene.items) {
       if ((it.char_family != 6 && it.char_family != 7) || !it.skinned ||

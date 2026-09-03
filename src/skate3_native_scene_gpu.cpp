@@ -174,10 +174,8 @@ namespace skate3::native_scene {
 namespace {
 
 // Retire a guest texture's GPU resources AND its view. Destruction is
-// deferred inside the RHI against the CURRENT submission; the `submission`
-// parameter is kept for call-site compatibility and ignored.
-void RetireGuestTexture(const GuestTexture& t, uint64_t submission) {
-  (void)submission;
+// deferred inside the RHI against the CURRENT submission.
+void RetireGuestTexture(const GuestTexture& t) {
   g_r.device->DestroyDeferred(t.texture);
   g_r.device->DestroyDeferred(t.upload);
   g_r.device->DestroyDeferred(t.upload_b);
@@ -404,7 +402,7 @@ void EvictTexStore(uint64_t frame_number, uint64_t submission) {
     if (it != g_r.tex_store.end()) {
       g_tex_store_bytes -= std::min<uint64_t>(g_tex_store_bytes,
                                               it->second.gpu_bytes);
-      RetireGuestTexture(it->second, submission);
+      RetireGuestTexture(it->second);
       g_r.tex_store.erase(it);
     }
   }
@@ -532,7 +530,7 @@ void EvictCubeStore(uint64_t frame_number, uint64_t submission) {
     }
   }
   if (oldest != g_r.cube_textures.end()) {
-    RetireGuestTexture(oldest->second, submission);
+    RetireGuestTexture(oldest->second);
     g_r.cube_textures.erase(oldest);
     g_store_evicted.fetch_add(1, std::memory_order_relaxed);
   }
@@ -4343,7 +4341,7 @@ void WarmItemResources(const NativeGuestOutputRenderContext& context, uint8_t* b
                      "fp {:016X}->{:016X}",
                      tex_ptr, key, it->second.incomplete, it->second.payload_fp, fp);
       }
-      RetireGuestTexture(it->second, context.device->CurrentSubmission());
+      RetireGuestTexture(it->second);
       g_r.tex_store.erase(it);
     }
     if (!within()) {
@@ -4910,7 +4908,7 @@ void PrewarmCommit(const NativeGuestOutputRenderContext& context,
           continue;
         }
         if (cit != g_r.cube_textures.end()) {
-          RetireGuestTexture(cit->second, context.device->CurrentSubmission());
+          RetireGuestTexture(cit->second);
           g_r.cube_textures.erase(cit);
         }
         if (t.valid) {
@@ -4993,7 +4991,7 @@ void PrewarmCommit(const NativeGuestOutputRenderContext& context,
             t.gt.fail_count = wit->second.fail_count;  // keep the backoff arc
           }
           t.gt.last_used_frame = wit->second.last_used_frame;
-          RetireGuestTexture(wit->second, context.device->CurrentSubmission());
+          RetireGuestTexture(wit->second);
           g_r.tex_store.erase(wit);
         }
         if (t.valid) {
@@ -6013,9 +6011,8 @@ void ReleaseRetiredAndFlushCaches(const NativeGuestOutputRenderContext& context)
   // GPU is done with the current submission) so hot-toggled decode settings
   // rebuild the world with the new rules this frame.
   if (g_flush_textures.exchange(false, std::memory_order_relaxed)) {
-    const uint64_t submission = context.device->CurrentSubmission();
     for (auto& [key, t] : g_r.tex_store) {
-      RetireGuestTexture(t, submission);
+      RetireGuestTexture(t);
     }
     g_r.tex_store.clear();
     g_r.tex_routes.clear();
@@ -8630,6 +8627,9 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
                         e.incomplete ? "inc" : "", e.near_black ? "nb" : "");
           }
           EnqueueWordsMiss(route.key, e.fetch_words);
+          if (e.near_black && e.nb_redecodes < 3) {
+            ++e.nb_redecodes;
+          }
         }
       }
       return &e;
@@ -10063,8 +10063,8 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
     g_occl_pub_ms.store(now_ms, std::memory_order_relaxed);
   }
   if (REXCVAR_GET(skate3_native_render_scene_sort_opaque) && debug_mode == 0) {
-    std::stable_sort(opaque_items.begin(), opaque_items.end(),
-                     [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::sort(opaque_items.begin(), opaque_items.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
   }
   for (const auto& [dist, item] : opaque_items) {
     timed_draw(*item);
@@ -10242,7 +10242,7 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
                         "retire + fresh decode",
                         frame_number, key);
           }
-          RetireGuestTexture(it->second, context.device->CurrentSubmission());
+          RetireGuestTexture(it->second);
           g_r.tex_store.erase(it);
           it = g_r.tex_store.end();  // falls into the inline decode below
         } else {
