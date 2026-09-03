@@ -89,6 +89,8 @@ REXCVAR_DECLARE(bool, skate3_native_render_scene_showcase);
 // and while it captures input the guest input system is gated off.
 REXCVAR_DECLARE(bool, skate3_native_render_scene_freecam);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_freecam_capture_input);
+// Defined in skate3_native_scene.cpp; the 2D/HUD toggle hotkey below flips it.
+REXCVAR_DECLARE(bool, skate3_native_render_scene_2d);
 
 REXCVAR_DEFINE_STRING(skate3_dlc_root, "", "Skate 3",
                       "Directory containing Skate 3 DLC package files");

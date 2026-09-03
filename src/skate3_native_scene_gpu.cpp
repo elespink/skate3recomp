@@ -68,6 +68,7 @@ REXCVAR_DECLARE(bool, skate3_native_render_scene_backface_cull);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_bloom);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_boot_native);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_cas_yield);
+REXCVAR_DECLARE(double, skate3_native_render_scene_character_size);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_char_shadow_exact);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_decals);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_dynamic_items);
