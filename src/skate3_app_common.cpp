@@ -2,6 +2,7 @@
 
 #include "skate3_demo_path.h"
 #include "skate3_fov.h"
+#include "skate3_freecam_input.h"
 #include "skate3_iso_installer.h"
 #include "skate3_native_render.h"
 #include "skate3_native_scene.h"
@@ -748,6 +749,13 @@ void Skate3BaseApp::OnPostSetup() {
   skate3::shader_disasm::RunIfRequested();
   ApplySelectedProfileToRuntime();
   ApplyGameplayCursorMode();
+  // The drone/free-fly cam sources its keyboard/mouse from the app's window
+  // event mirror on every platform (the raw GetAsyncKeyState path in
+  // UpdateFreecam is Windows-only). Independent of the MnK controller-emulation
+  // driver so mnk_mode doesn't have to be enabled to fly.
+  if (window()) {
+    skate3::freecam_input::Register(window());
+  }
 
   if (auto* input_system = static_cast<rex::input::InputSystem*>(runtime()->input_system())) {
     input_system->SetActiveCallback([this]() {
@@ -814,6 +822,9 @@ void Skate3BaseApp::OnPostSetup() {
 }
 
 void Skate3BaseApp::OnShutdown() {
+  if (window()) {
+    skate3::freecam_input::Unregister(window());
+  }
   rex::ui::UnregisterBind("bind_skate3_menu");
   rex::ui::UnregisterBind("bind_skate3_menu_alt");
   rex::ui::UnregisterBind("bind_skate3_save_draw_fingerprints");
