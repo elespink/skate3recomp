@@ -283,6 +283,15 @@ REXCVAR_DEFINE_DOUBLE(skate3_native_render_scene_sun_elevation, 35.0, "Skate 3",
                       "values = long shadows and the most visible shafts).")
     .range(2.0, 88.0)
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_DOUBLE(skate3_native_render_scene_sun_brightness, 1.0, "Skate 3",
+                      "Sun/scene brightness multiplier (linear, applied to the "
+                      "per-path exposure constants every frame: world shadow_rows[40], "
+                      "dynamicobject dynobj_rows[3], sky sky_sun[4]/[5], and each "
+                      "character's key/ambient/SH rows). 1.0 = captured look; <1.0 "
+                      "dims toward night. Works standalone (no sun-override needed) "
+                      "and is baked into the Night preset.")
+    .range(0.0, 5.0)
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DEFINE_BOOL(skate3_native_render_scene_haze, true, "Skate 3",
                     "Directional atmospheric haze: sun-scattered light added with "
                     "view distance, strongest looking toward the sun, tinted by the "
@@ -347,12 +356,13 @@ REXCVAR_DEFINE_DOUBLE(skate3_native_render_scene_showcase_wipe, 3.0, "Skate 3",
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DEFINE_BOOL(skate3_native_render_scene_freecam, false, "Skate 3",
                     "Detach the render camera from the game (drone / free-fly "
-                    "cam): WASD fly, E/Space up, Q/C down, arrow keys or "
-                    "right-mouse drag look, Z/X zoom, Shift fast, Ctrl slow. "
-                    "The game keeps simulating, but its main render camera is "
-                    "taken over (ViewCamera::SetViewMatrix override), so the "
-                    "game culls and submits the world around the flown pose "
-                    "itself. Also on the End key (bind_skate3_freecam).")
+                    "cam, AZERTY): Z/S forward-back, Q/D strafe, E/Space up, "
+                    "C down, arrow keys or right-mouse drag look, Z/X zoom, "
+                    "Shift fast, Ctrl slow. The game keeps simulating, but its "
+                    "main render camera is taken over (ViewCamera::SetViewMatrix "
+                    "override), so the game culls and submits the world around "
+                    "the flown pose itself. Also on the F7 key "
+                    "(bind_skate3_freecam).")
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DEFINE_DOUBLE(skate3_native_render_scene_freecam_speed, 8.0, "Skate 3",
                       "Freecam base fly speed in world units (meters) per "
@@ -787,8 +797,10 @@ REXCVAR_DEFINE_INT32(skate3_native_render_scene_refl_mode, 0, "Skate 3",
                      "Reflective glass debug: 0 normal, 1 cube term off, 2 cube at "
                      "the absolute LOD in refl_lod, 3 flat normal (no normal-map "
                      "perturb), 4 visualize the cube sample only, 5 body only (no "
-                     "spec, no cube), 6 normal-map LOD bias from the slider.")
-    .range(0, 6)
+                     "spec, no cube), 6 normal-map LOD bias from the slider, "
+                     "7 visualize lightmap sample, 8 visualize lightmap UV "
+                     "(frac x16), 9 lightmap resolve status (blue = missing).")
+    .range(0, 9)
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DEFINE_DOUBLE(skate3_native_render_scene_refl_lod, 0.0, "Skate 3",
                       "Reflective glass debug: mode 2 = absolute cube mip level; "
@@ -853,6 +865,21 @@ REXCVAR_DEFINE_BOOL(skate3_native_render_scene_entity_fade, true, "Skate 3",
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DEFINE_BOOL(skate3_native_render_scene_dynamic_items, true, "Skate 3",
                     "Publish dynamic entities (characters, props, cloth)")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_BOOL(skate3_native_render_scene_nude, false, "Skate 3",
+                    "Nude mode: suppress garment draws (player tees, NPC jackets, "
+                    "hair_ropa) so skaters render in just their skin/body layer. "
+                    "Garments are the character.*_ropa cloth-sim variants plus plain "
+                    "character.cloth/leather/jacket pieces (DrawItem::garment); "
+                    "skin/face/accessories stay.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_DOUBLE(
+    skate3_native_render_scene_character_size, 1.0, "Skate 3",
+    "Uniform scale multiplier for skater/NPC characters (char_family 1/2): "
+    "1.0 = normal, 2.0 = double size. Scales the world matrix 3x3 linear "
+    "rows; feet stay near their original position (model-origin-relative "
+    "scale). Affects all skinned character items including garments and hair.")
+    .range(0.1, 5.0)
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DEFINE_BOOL(
     skate3_native_render_scene_lw_fade, true, "Skate 3",
@@ -2128,6 +2155,7 @@ bool BuildItemFromMesh(uint8_t* base, uint32_t mesh, DrawItem& item) {
   item.char_family = 0;
   item.hair_alpha_tex = 0;
   item.ropa = false;
+  item.garment = false;
   item.decal = false;
   item.decal_tileable = false;
   item.transparent = false;
@@ -2265,6 +2293,30 @@ bool BuildItemFromMesh(uint8_t* base, uint32_t mesh, DrawItem& item) {
                   std::memcmp(mat_name + len - 5, "_ropa", 5) == 0) {
                 item.ropa = true;
                 mat_name[len - 5] = '\0';
+              }
+            }
+            // Nude mode also hides plain cloth/leather/jacket garments whose
+            // material lacks the "_ropa" cloth-sim suffix (some skater tees are
+            // authored as plain character.cloth). Only cloth-family names are
+            // flagged so skin/face/accessory pieces (also char_family 2) stay.
+            {
+              // Hair is NOT clothing and must survive nude mode, even when it
+              // is authored as _ropa (character.hair_ropa / default_hair_ropa;
+              // the _ropa suffix was stripped above) or as plain cloth-family.
+              // Match both character.hair and character.default_hair prefixes.
+              const char* sub = mat_name + 10;
+              const bool is_hair =
+                  std::memcmp(mat_name, "character.", 10) == 0 &&
+                  (std::memcmp(sub, "hair", 5) == 0 ||
+                   std::memcmp(sub, "default_hair", 13) == 0);
+              item.garment = item.ropa && !is_hair;
+              if (!item.garment && !is_hair &&
+                  std::memcmp(mat_name, "character.", 10) == 0) {
+                const bool cloth = std::memcmp(sub, "cloth", 5) == 0;
+                const bool dcloth = std::memcmp(sub, "default_cloth", 13) == 0;
+                const bool leather = std::memcmp(sub, "leather", 7) == 0;
+                const bool jacket = std::memcmp(sub, "jacket", 6) == 0;
+                item.garment = cloth || dcloth || leather || jacket;
               }
             }
             item.hair = std::memcmp(mat_name, "character.hair", 15) == 0;
@@ -4340,6 +4392,13 @@ uint32_t CaptureDynamicState(uint8_t* base, uint32_t ctx, bool world_path,
   item.shadow_caster =
       ortho_submit || (ctx != 0 && g_frame_ortho_ctx.count(ctx) != 0);
   item.dyn_entity = true;
+  // Nude mode: drop Ropa cloth-sim garments (player tees / NPC jackets /
+  // hair_ropa) entirely at publish so the skater renders as just their skin/
+  // body layer. The garment class is exactly the character.*_ropa material
+  // variant (DrawItem::ropa); non-ropa character items (skin/face/hair) stay.
+  if (item.garment && REXCVAR_GET(skate3_native_render_scene_nude)) {
+    return 0;
+  }
   g_frame_dynitems.push_back(std::move(item));
   const size_t index = g_frame_dynitems.size() - 1;
   if (g_frame_dynitems[index].pending ||
@@ -4366,7 +4425,8 @@ uint32_t CaptureClothDraw(uint8_t* base, uint32_t r4, uint32_t r5, uint32_t r6,
   (void)r4;
   (void)r7;
   if (!SceneEnabled() || r6 != 0x80000000u ||
-      !REXCVAR_GET(skate3_native_render_scene_quadlists)) {
+      !REXCVAR_GET(skate3_native_render_scene_quadlists) ||
+      REXCVAR_GET(skate3_native_render_scene_nude)) {
     return 0;
   }
   // Quad-list draw: stream 0 is a dynamic ping-pong object whose vertex
@@ -6222,9 +6282,9 @@ bool UpdateFreecam(FrameScene& scene, const float cam_view[16], double now) {
 #endif
     fc.engaged = true;
     REXLOG_INFO(
-        "native-scene freecam: ENGAGED at ({:.1f}, {:.1f}, {:.1f}); WASD fly, "
-        "E/Space up, Q/C down, arrows/right-drag look, Z/X zoom, Shift fast, "
-        "Ctrl slow",
+        "native-scene freecam: ENGAGED at ({:.1f}, {:.1f}, {:.1f}); AZERTY ZQSD fly "
+        "(Z/S forward-back, Q/D strafe), E/Space up, C down, arrows/right-drag look, "
+        "Z/X zoom, Shift fast, Ctrl slow",
         fc.pos[0], fc.pos[1], fc.pos[2]);
   }
   const double dt = std::clamp(now - fc.last_t, 0.0, 0.1);
@@ -6236,10 +6296,12 @@ bool UpdateFreecam(FrameScene& scene, const float cam_view[16], double now) {
   double speed_mult = 1.0, zoom_dir = 0.0;
 #if defined(_WIN32)
   const auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
-  mv_f = (down('W') ? 1.0 : 0.0) - (down('S') ? 1.0 : 0.0);
-  mv_r = (down('D') ? 1.0 : 0.0) - (down('A') ? 1.0 : 0.0);
+  // AZERTY fly layout: Z = forward, S = back, Q = strafe left, D = strafe right;
+  // up = E or Space, down = C (Q is now strafe-left, not down).
+  mv_f = (down('Z') ? 1.0 : 0.0) - (down('S') ? 1.0 : 0.0);
+  mv_r = (down('D') ? 1.0 : 0.0) - (down('Q') ? 1.0 : 0.0);
   mv_u = ((down('E') || down(VK_SPACE)) ? 1.0 : 0.0) -
-         ((down('Q') || down('C')) ? 1.0 : 0.0);
+         (down('C') ? 1.0 : 0.0);
   lk_yaw = (down(VK_RIGHT) ? 1.0 : 0.0) - (down(VK_LEFT) ? 1.0 : 0.0);
   lk_pitch = (down(VK_UP) ? 1.0 : 0.0) - (down(VK_DOWN) ? 1.0 : 0.0);
   zoom_dir = (down('Z') ? 1.0 : 0.0) - (down('X') ? 1.0 : 0.0);
@@ -6270,10 +6332,12 @@ bool UpdateFreecam(FrameScene& scene, const float cam_view[16], double now) {
   // VirtualKey values are identical to the Win32 VK_* codes above.
   using rex::ui::VirtualKey;
   const auto down = [](VirtualKey vk) { return freecam_input::IsKeyDown(vk); };
-  mv_f = (down(VirtualKey::kW) ? 1.0 : 0.0) - (down(VirtualKey::kS) ? 1.0 : 0.0);
-  mv_r = (down(VirtualKey::kD) ? 1.0 : 0.0) - (down(VirtualKey::kA) ? 1.0 : 0.0);
+  // AZERTY fly layout: Z = forward, S = back, Q = strafe left, D = strafe right;
+  // up = E or Space, down = C (Q is now strafe-left, not down).
+  mv_f = (down(VirtualKey::kZ) ? 1.0 : 0.0) - (down(VirtualKey::kS) ? 1.0 : 0.0);
+  mv_r = (down(VirtualKey::kD) ? 1.0 : 0.0) - (down(VirtualKey::kQ) ? 1.0 : 0.0);
   mv_u = ((down(VirtualKey::kE) || down(VirtualKey::kSpace)) ? 1.0 : 0.0) -
-         ((down(VirtualKey::kQ) || down(VirtualKey::kC)) ? 1.0 : 0.0);
+         (down(VirtualKey::kC) ? 1.0 : 0.0);
   lk_yaw = (down(VirtualKey::kRight) ? 1.0 : 0.0) -
            (down(VirtualKey::kLeft) ? 1.0 : 0.0);
   lk_pitch = (down(VirtualKey::kUp) ? 1.0 : 0.0) -
@@ -8256,31 +8320,79 @@ static void RebasisShadowRows(FrameScene& scene, const float sun[3],
 // Baked lightmap shade and the sky dome's painted sun are game content and
 // stay put.
 static void ApplySunOverride(FrameScene& scene) {
-  if (!REXCVAR_GET(skate3_native_render_scene_sun_override)) {
-    return;
+  // Direction override (skate3_native_render_scene_sun_override): rotates every
+  // captured per-frame light transform to the azimuth/elevation direction.
+  if (REXCVAR_GET(skate3_native_render_scene_sun_override)) {
+    const float kDeg = 0.01745329252f;
+    const float az = float(REXCVAR_GET(skate3_native_render_scene_sun_azimuth)) * kDeg;
+    const float el =
+        float(REXCVAR_GET(skate3_native_render_scene_sun_elevation)) * kDeg;
+    // Unit vector TOWARD the sun (y up; azimuth 0 = +Z, 90 = +X).
+    const float sun[3] = {std::cos(el) * std::sin(az), std::sin(el),
+                          std::cos(el) * std::cos(az)};
+    RebasisShadowRows(scene, sun, /*include_ws=*/true);
+    if (scene.shadow_valid) {
+      scene.shadow_rows[24] = sun[0];  // c6 sun direction
+      scene.shadow_rows[25] = sun[1];
+      scene.shadow_rows[26] = sun[2];
+    }
+    if (scene.dynobj_valid) {
+      scene.dynobj_rows[0] = sun[0];
+      scene.dynobj_rows[1] = sun[1];
+      scene.dynobj_rows[2] = sun[2];
+    }
+    if (scene.sky_sun_valid) {
+      scene.sky_sun[0] = sun[0];
+      scene.sky_sun[1] = sun[1];
+      scene.sky_sun[2] = sun[2];
+    }
   }
-  const float kDeg = 0.01745329252f;
-  const float az = float(REXCVAR_GET(skate3_native_render_scene_sun_azimuth)) * kDeg;
-  const float el =
-      float(REXCVAR_GET(skate3_native_render_scene_sun_elevation)) * kDeg;
-  // Unit vector TOWARD the sun (y up; azimuth 0 = +Z, 90 = +X).
-  const float sun[3] = {std::cos(el) * std::sin(az), std::sin(el),
-                        std::cos(el) * std::cos(az)};
-  RebasisShadowRows(scene, sun, /*include_ws=*/true);
-  if (scene.shadow_valid) {
-    scene.shadow_rows[24] = sun[0];  // c6 sun direction
-    scene.shadow_rows[25] = sun[1];
-    scene.shadow_rows[26] = sun[2];
-  }
-  if (scene.dynobj_valid) {
-    scene.dynobj_rows[0] = sun[0];
-    scene.dynobj_rows[1] = sun[1];
-    scene.dynobj_rows[2] = sun[2];
-  }
-  if (scene.sky_sun_valid) {
-    scene.sky_sun[0] = sun[0];
-    scene.sky_sun[1] = sun[1];
-    scene.sky_sun[2] = sun[2];
+
+  // Sun/scene brightness (skate3_native_render_scene_sun_brightness): always
+  // applied, independent of the direction override, so the manual slider works
+  // standalone (and the Night preset dims the scene). There is no scene-global
+  // brightness value; each path carries its own exposure/brightness constant,
+  // so scale them here, in the linear domain, before the GPU pass uploads the
+  // rows. Direction-only rows ([0..26], sky [0..2], shadow basis, dynobj dir,
+  // char light) are NEVER scaled. Runs after the direction rebasis so the
+  // rebasis (which only touches rows 0..23 + dynobj_ws) can't clobber the
+  // dimmed exposures.
+  const double br = REXCVAR_GET(skate3_native_render_scene_sun_brightness);
+  if (std::fabs(br - 1.0) > 1e-4) {
+    const float b = float(br);
+    // WORLD: sh_sun.w = world scene exposure (dims fog + baked lightmaps too).
+    if (scene.shadow_valid) {
+      scene.shadow_rows[40] *= b;
+    }
+    // DYNOBJ props: dyn_sun.w = prop exposure (ambient is folded inside the
+    // * dyn_sun.w chain, so scaling it dims the whole prop).
+    if (scene.dynobj_valid) {
+      scene.dynobj_rows[3] *= b;
+    }
+    // SKY: both sky_sun[4] (pre-tone) and [5] (exposure) multiply lin.
+    if (scene.sky_sun_valid) {
+      scene.sky_sun[4] *= b;
+      scene.sky_sun[5] *= b;
+    }
+    // CHARACTERS (CH cbuffer, char_rows 18xfloat4): scale key color + exposure +
+    // flat ambient + pre-scaled SH rows. Only items with a validated char block
+    // (char_rows[14*4+1] > 0 = family marker). Do NOT scale ch_amb.w [11] (the
+    // SH multiplier) as well, or the SH irradiance is doubled; scaling the SH
+    // rows alone is sufficient.
+    for (DrawItem& it : scene.items) {
+      if (it.char_rows[14 * 4 + 1] <= 0.0f) {
+        continue;  // no validated character lighting
+      }
+      float* d = it.char_rows;
+      d[4] *= b; d[5] *= b; d[6] *= b;  // ch_key.rgb (sun/key color)
+      d[7] *= b;                        // ch_key.w (exposure E)
+      d[8] *= b; d[9] *= b; d[10] *= b; // ch_amb.rgb (flat ambient)
+      for (int r = 0; r < 9; ++r) {     // ch_sh[9] pre-scaled SH irradiance
+        d[(3 + r) * 4 + 0] *= b;
+        d[(3 + r) * 4 + 1] *= b;
+        d[(3 + r) * 4 + 2] *= b;
+      }
+    }
   }
 }
 
@@ -8678,6 +8790,13 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
     }
     DrawItem item;
     if (BuildItemGeometry(base, r.a, item)) {
+      // Nude mode: drop Ropa cloth-sim garments regardless of which publish
+      // path they'd take (rigid fmt-57 garments reach the frame ONLY through
+      // the world sort lists, so the CaptureDynamicState guard alone was
+      // insufficient).
+      if (item.garment && REXCVAR_GET(skate3_native_render_scene_nude)) {
+        continue;
+      }
       if (item.skinned) {
         // Skinned meshes reached through the world sort lists (flags,
         // banners) have no captured palette, bind-pose garbage; skip.
@@ -8921,6 +9040,9 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
       if (dyn_slot.find(ctxk) != dyn_slot.end()) {
         continue;  // this instance published live
       }
+      if (item.garment && REXCVAR_GET(skate3_native_render_scene_nude)) {
+        continue;  // nude mode: never re-serve a garment's instance transform
+      }
       if (!ReadCtxInstanceWorld(base, ctxk, item.world)) {
         g_world_props.fetch_add(1, std::memory_order_relaxed);
         continue;  // no placement: dropping beats an origin ghost
@@ -8934,6 +9056,9 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
     // world AND palette together (mixing frames' interpretations is the
     // mangled-ribbon bug; see g_ropa_state_cache).
     for (const auto& [mesh, cand] : pending_ropa_by_mesh) {
+      if (REXCVAR_GET(skate3_native_render_scene_nude)) {
+        continue;  // nude mode: skip ropa rescues entirely
+      }
       if (pub_count.find(mesh) != pub_count.end()) {
         continue;  // a live copy published; nothing to rescue
       }
@@ -9190,6 +9315,11 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
         }
         continue;
       }
+      // Nude mode: don't cache garment copies as the gap-fill source, or a
+      // toggled-off frame could resurrect a dropped tee for the fill window.
+      if (item.garment && REXCVAR_GET(skate3_native_render_scene_nude)) {
+        continue;
+      }
       t.frame = s_pub_frame;
       t.item = item;
       if (gap >= 2 && gap <= 4) {
@@ -9212,6 +9342,9 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
         }
         const uint64_t gap = s_pub_frame - t.frame;
         if (gap <= 2) {
+          if (t.item.garment && REXCVAR_GET(skate3_native_render_scene_nude)) {
+            continue;  // nude mode: never gap-fill a garment
+          }
           // t.frame stays at the last REAL publish, so the fill self-limits
           // to two frames and the telemetry above still sees the true gap
           // when the stream resumes.

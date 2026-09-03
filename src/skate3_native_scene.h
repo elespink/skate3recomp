@@ -174,6 +174,13 @@ struct DrawItem {
   // Detected via the AttribulatorMaterialName channel; consumed by
   // CaptureSkinnedState.
   bool ropa;
+  // Garment-to-hide under nude mode. True when ropa is true (the
+  // character.*_ropa cloth-sim variant) OR the material is a plain cloth/
+  // leather/jacket character piece (character.cloth with no _ropa suffix —
+  // some skater garments are authored without the cloth-sim suffix, so the
+  // ropa-only check alone let the tee leak through nude mode). Deliberately
+  // does NOT cover skin/face (also char_family 2) so nude keeps the body.
+  bool garment;
   // character.alpha: translucent CAC accessory pieces (sunglass lenses).
   // cac_alphaPS outputs alpha = the mesh's "alpha" channel texture sampled
   // at the raw second texcoord x the entity alpha constant (ucode: oC0.w =

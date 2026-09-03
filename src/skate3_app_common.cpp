@@ -1,6 +1,7 @@
 #include "skate3_app_common.h"
 
 #include "skate3_demo_path.h"
+#include "skate3_crash_log.h"
 #include "skate3_fov.h"
 #include "skate3_freecam_input.h"
 #include "skate3_iso_installer.h"
@@ -737,11 +738,17 @@ void Skate3BaseApp::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
                               skate3_native_render_scene_showcase,
                               !REXCVAR_GET(skate3_native_render_scene_showcase));
                         });
-  rex::ui::RegisterBind("bind_skate3_freecam", "End",
-                        "Drone camera (free fly)", [] {
+  rex::ui::RegisterBind("bind_skate3_freecam", "F7",
+                        "Drone camera (free fly, AZERTY ZQSD)", [] {
                           REXCVAR_SET(
                               skate3_native_render_scene_freecam,
                               !REXCVAR_GET(skate3_native_render_scene_freecam));
+                        });
+  rex::ui::RegisterBind("bind_skate3_toggle_2d", "F11",
+                        "Toggle 2D/APT HUD overlay", [] {
+                          REXCVAR_SET(
+                              skate3_native_render_scene_2d,
+                              !REXCVAR_GET(skate3_native_render_scene_2d));
                         });
 }
 
@@ -749,6 +756,10 @@ void Skate3BaseApp::OnPostSetup() {
   skate3::shader_disasm::RunIfRequested();
   ApplySelectedProfileToRuntime();
   ApplyGameplayCursorMode();
+  // Crash diagnostics: install the hard-fault handler as early as possible so
+  // any later fault during setup or the guest runloop produces a copyable
+  // report (crash_log.txt next to the executable) instead of a bare kill.
+  skate3::crashlog::Install();
   // The drone/free-fly cam sources its keyboard/mouse from the app's window
   // event mirror on every platform (the raw GetAsyncKeyState path in
   // UpdateFreecam is Windows-only). Independent of the MnK controller-emulation
