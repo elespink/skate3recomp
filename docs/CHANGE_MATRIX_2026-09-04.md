@@ -1,11 +1,11 @@
-# Change Matrix — fork/main vs upstream (f6e0ae8) through 21aec37
+# Change Matrix — fork/main vs upstream (f6e0ae8) through d20d0cc
 
-**Date:** 2026-09-04. **Base (upstream):** `f6e0ae8`. **HEAD (fork/main):** `21aec37`.
+**Date:** 2026-09-04. **Base (upstream):** `f6e0ae8`. **HEAD (fork/main):** `d20d0cc`.
 All commits live on `elespink/skate3recomp:main`; only feature-complete, user-validated
 work has been pushed here (nothing is an experiment).
 
 Granularity note: the first 6 commits were pushed to upstream `origin/main` as a single PR
-(#148 + earlier); the last one is fork-only. Everything below is what makes the fork the
+(#148 + earlier); the last ones are fork-only. Everything below is what makes the fork the
 preferred, working tree.
 
 ---
@@ -14,14 +14,15 @@ preferred, working tree.
 
 | Metric | Value |
 |--------|-------|
-| Commits since `f6e0ae8` | 7 |
-| Files changed | 15 (+2 submodule pointer move) |
-| Additions | +1,844 |
+| Commits since `f6e0ae8` | 8 |
+| Files changed | 16 (+2 submodule pointer moves) |
+| Additions | +2,083 |
 | Deletions | −98 |
 | `src/` (renderer/game glue) | 9 files |
 | New source files | `skate3_crash_log.{h,cpp}`, `skate3_freecam_input.{h,cpp}` |
 | New tooling | `tests/run_tests.sh` + `check_cvars.py` + `check_deadcode.py` |
-| Product changes | Game-playable, features + perf + stability |
+| SDK submodule | `6c2b936` → `7cc198a` (RHI diagnostics) |
+| Product changes | Game-playable, features + perf + stability + RHI diagnostics |
 
 ---
 
@@ -36,6 +37,7 @@ preferred, working tree.
 | `c798e58` | Perf batch: park-char adaptive boxcar smoothing, palette memo, tex-retire + dialog/sun cleanups | ~30Hz park character desync + micro-stutter + a duplicate sun-seed block. |
 | `00ed5ff` | Dedupe sun/haze duplicate sliders; park-char kRing 24→32; F3 bone-palette ring reuse | Removed the F12 "two sliders move one cvar" bug; widened the pose ring to bracket the adaptive window; halved the skinned-bone palette upload. |
 | `21aec37` | Reuse texture+SRV on staged content swaps (drain/tex-view reuse) | Steady-state 16-frame texture re-decode was retiring+e recreating views every poll, feeding `DrainRetired` (the dominant remaining micro-stutter). In-place re-upload kills that churn. |
+| `d20d0cc` | Live F12 RHI diagnostics: drain/view-churn perf ring, fullscreen view trace, resource ledger (+ SDK `7cc198a`) | Adds an on-screen overlay to name the exact source of the residual `drain=` micro-stutter (a periodic 2560x1440 standalone SRV create+destroy). Low-overhead per-frame ring + once-per-sec log line. |
 
 ---
 
