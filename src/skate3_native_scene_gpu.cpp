@@ -6789,6 +6789,8 @@ bool RenderShadowAtlas(const NativeGuestOutputRenderContext& context,
             std::memcpy(constants, c.item->world, sizeof(c.item->world));
             // Character-size scaling for non-skinned char_family items in the
             // shadow pass (skinned items are scaled via bone palette upload).
+            // Translation scales about the character root like the main pass
+            // (item.root_valid; unscaled when no trusted root exists).
             if ((c.item->char_family == 1 || c.item->char_family == 2) &&
                 !c.item->skinned) {
               const float cs = float(REXCVAR_GET(
@@ -6796,6 +6798,13 @@ bool RenderShadowAtlas(const NativeGuestOutputRenderContext& context,
               if (cs != 1.0f) {
                 for (int i = 0; i < 12; ++i) {
                   constants[i] *= cs;
+                }
+                if (c.item->root_valid) {
+                  for (int r = 0; r < 3; ++r) {
+                    constants[12 + r] =
+                        c.item->root_pos[r] +
+                        (constants[12 + r] - c.item->root_pos[r]) * cs;
+                  }
                 }
               }
             }
@@ -8980,13 +8989,22 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
     // the world 3x3 linear rows (correct for rigid pieces positioned by the
     // world matrix). Skinned items are scaled via the bone palette instead
     // (see bone-upload sites below) to avoid breaking bone-placed vertices
-    // that are already in absolute world space.
+    // that are already in absolute world space. The translation is scaled
+    // about the character's root (item.root_pos, bone 0 of a same-entity
+    // skinned sibling) so rigid accessories track the scaled body; with no
+    // trusted root the translation stays unscaled (pre-fix behavior).
     if ((item.char_family == 1 || item.char_family == 2) && !item.skinned) {
       const float cs = float(REXCVAR_GET(
           skate3_native_render_scene_character_size));
       if (cs != 1.0f) {
         for (int i = 0; i < 12; ++i) {
           constants[i] *= cs;
+        }
+        if (item.root_valid) {
+          for (int r = 0; r < 3; ++r) {
+            constants[12 + r] =
+                item.root_pos[r] + (constants[12 + r] - item.root_pos[r]) * cs;
+          }
         }
       }
     }

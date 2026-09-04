@@ -305,6 +305,18 @@ struct DrawItem {
   // GPU copies must be revalidated against this every frame.
   uint64_t fingerprint;
   float world[16];    // row-vector convention, translation in row 3
+  // Character-size pivot: the character's root-borne world position (the
+  // skinned path's bone 0 = the skeleton root), captured AFTER pose
+  // interpolation so it matches the palette the renderer uploads. Rigid
+  // (non-skinned) char_family 1/2 pieces scale their world.translation
+  // about this point so accessories (hats / jewellery / rigid ropa) track
+  // the scaled body: the skinned body scales every bone translation about
+  // root, so a rigid piece that keeps its world translation fixed detaches
+  // while the body grows. root_valid gates the scale: false = no trusted
+  // character root this frame, the translation stays unscaled (pre-fix
+  // behavior, never worse than before).
+  float root_pos[3] = {};
+  bool root_valid = false;
   float bbox_min[3];  // mesh-local bounds, for decode validation
   float bbox_max[3];
   std::vector<DrawEntry> draws;

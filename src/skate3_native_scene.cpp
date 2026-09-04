@@ -10672,6 +10672,75 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
       }
     }
   }
+  // Rigid-piece character-size pivot (see docs/agent-reports/
+  // rigid-pivot-fix.md): the renderer scales the skinned body's bone
+  // translations about bone 0 (the skeleton root), but rigid (non-skinned)
+  // char_family 1/2 pieces scale only their world 3x3 and leave the
+  // translation fixed, so accessories detach from the growing body at
+  // cs != 1.0. Link each rigid piece to a SAME-ENTITY skinned sibling's
+  // root via the presentation-entity store (the same entity linkage the
+  // garment char-rows bridge uses) and publish it as DrawItem::root_pos.
+  // Runs at the very end of the build, after every bone/world mutation
+  // (pose smoothing, rescues, retention re-appends), so the skinned source
+  // root is exactly what the renderer uploads to the bone ring. Pieces
+  // without a trusted same-entity root leave root_valid = false and the gpu
+  // pass keeps their translation unscaled (pre-fix behavior).
+  {
+    // Resolve each char ctx's owning entity once per frame (LookupCtx takes
+    // a lock; the char-item subsets are small, but a per-frame ctx flush
+    // keeps it constant regardless).
+    std::unordered_map<uint32_t, uint32_t> ctx_ent;
+    const auto ent_of = [&](uint32_t ctx) -> uint32_t {
+      if (ctx == 0) {
+        return 0;
+      }
+      const auto cit = ctx_ent.find(ctx);
+      if (cit != ctx_ent.end()) {
+        return cit->second;
+      }
+      uint32_t e = 0;
+      skate3::native_entity::CtxInfo info;
+      if (skate3::native_entity::LookupCtx(ctx, &info)) {
+        e = info.entity;
+      }
+      ctx_ent[ctx] = e;
+      return e;
+    };
+    const bool want_pivot = std::fabs(REXCVAR_GET(
+        skate3_native_render_scene_character_size) - 1.0f) > 1e-6f;
+    if (want_pivot) {
+      // First pass: collect each entity's root from a skinned char sibling
+      // (bone 0 translation, the pivot the skinned scaling path uses).
+      std::unordered_map<uint32_t, std::array<float, 3>> ent_root;
+      for (const DrawItem& it : scene.items) {
+        if (it.char_family != 1 && it.char_family != 2) {
+          continue;
+        }
+        if (!it.skinned || it.bones.size() < 12) {
+          continue;
+        }
+        const uint32_t e = ent_of(it.ctx);
+        if (e == 0 || ent_root.find(e) != ent_root.end()) {
+          continue;
+        }
+        ent_root[e] = {it.bones[3], it.bones[7], it.bones[11]};
+      }
+      // Second pass: publish the root onto the frame's rigid char pieces.
+      for (DrawItem& it : scene.items) {
+        if ((it.char_family != 1 && it.char_family != 2) || it.skinned) {
+          continue;
+        }
+        const auto hit = ent_root.find(ent_of(it.ctx));
+        if (hit == ent_root.end()) {
+          continue;
+        }
+        it.root_pos[0] = hit->second[0];
+        it.root_pos[1] = hit->second[1];
+        it.root_pos[2] = hit->second[2];
+        it.root_valid = true;
+      }
+    }
+  }
   g_last_publish_ns.store(std::chrono::duration_cast<std::chrono::nanoseconds>(
                               std::chrono::steady_clock::now().time_since_epoch())
                               .count(),

@@ -312,6 +312,11 @@ void DrawMaxQualityToggle() {
 
 bool s_showcase_setup_open = false;
 
+// ---- Performance window ----------------------------------------------------
+// Standalone MangoHUD-style dashboard. Owned/modelled on the showcase setup
+// window: opened from the F12 menu, kept open independently of it.
+bool s_perf_window_open = false;
+
 struct ShowcaseRow {
   const skate3::native_scene::ShowcaseLayer* layer;
   bool enabled;
@@ -1028,39 +1033,20 @@ void DrawSceneContentSection() {
                            "overdraw)"));
 }
 
-void DrawPacingSection() {
-  REXCVAR_SET(skate3_native_render_scene_smooth_camera,
-              CvarCheckbox("Smooth camera + entity poses",
-                           REXCVAR_GET(skate3_native_render_scene_smooth_camera),
-                           "The guest updates its camera/entities on its own ~200 Hz "
-                           "sim tick; raw poses judder at high render rates. Re-times "
-                           "them on the host clock (1 kHz camera sampler + pose "
-                           "interpolation, a few ms of camera latency)."));
-  {
-    float w = float(REXCVAR_GET(skate3_native_render_scene_smooth_camera_filter_ms));
-    if (ImGui::SliderFloat("camera filter (ms, 0 = off)", &w, 0.0f, 100.0f, "%.0f")) {
-      REXCVAR_SET(skate3_native_render_scene_smooth_camera_filter_ms, double(w));
-    }
-    if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip(
-          "Boxcar average over the camera pose signal. The game's camera "
-          "advances in 60 Hz-quantized lumps at high fps (the measured cause "
-          "of stick-pan stutter); 50 ms = three 60 Hz periods cancels it "
-          "exactly for ~25 ms extra camera latency. 0 reverts to raw "
-          "interpolation.");
-    }
-  }
-  REXCVAR_SET(skate3_native_render_scene_sort_opaque,
-              CvarCheckbox("Front-to-back opaque sort",
-                           REXCVAR_GET(skate3_native_render_scene_sort_opaque),
-                           "Early-z rejects occluded pixels before the material shading"));
-}
-
-// ---- Performance dashboard (MangoHUD-style) --------------------------------
+// ---- Performance window (MangoHUD-style) -----------------------------------
 // Consolidated live readout: FPS counter, frame-time graph, RHI timing,
 // GPU resource ledger, scene stats. All data from already-available APIs.
-void DrawPerformanceSection(rex::ui::Presenter* presenter) {
+// Standalone window (like the showcase setup editor), opened from the F12
+// menu. Also hosts the pacing and perf-logging / capture-hotkey controls
+// that were previously spread across the F12 sections.
+void DrawPerformanceWindow(bool* p_open, rex::ui::Presenter* presenter) {
   using rex::graphics::vulkan::NrDeviceDiag;
+
+  ImGui::SetNextWindowSize(ImVec2(430.0f, 0.0f), ImGuiCond_FirstUseEver);
+  if (!ImGui::Begin("Performance", p_open, ImGuiWindowFlags_NoCollapse)) {
+    ImGui::End();
+    return;
+  }
 
   // ---- Prominent FPS counter ----
   if (presenter && presenter->GuestFrameStatsEnabled()) {
@@ -1298,6 +1284,49 @@ void DrawPerformanceSection(rex::ui::Presenter* presenter) {
       REXCVAR_SET(skate3_native_render_scene_perf_interval, interval);
     }
   }
+  REXCVAR_SET(skate3_native_render_scene_smooth_camera,
+              CvarCheckbox("Smooth camera + entity poses",
+                           REXCVAR_GET(skate3_native_render_scene_smooth_camera),
+                           "The guest updates its camera/entities on its own ~200 Hz "
+                           "sim tick; raw poses judder at high render rates. Re-times "
+                           "them on the host clock (1 kHz camera sampler + pose "
+                           "interpolation, a few ms of camera latency)."));
+  {
+    float w = float(REXCVAR_GET(skate3_native_render_scene_smooth_camera_filter_ms));
+    if (ImGui::SliderFloat("camera filter (ms, 0 = off)", &w, 0.0f, 100.0f, "%.0f")) {
+      REXCVAR_SET(skate3_native_render_scene_smooth_camera_filter_ms, double(w));
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip(
+          "Boxcar average over the camera pose signal. The game's camera "
+          "advances in 60 Hz-quantized lumps at high fps (the measured cause "
+          "of stick-pan stutter); 50 ms = three 60 Hz periods cancels it "
+          "exactly for ~25 ms extra camera latency. 0 reverts to raw "
+          "interpolation.");
+    }
+  }
+  REXCVAR_SET(skate3_native_render_scene_sort_opaque,
+              CvarCheckbox("Front-to-back opaque sort",
+                           REXCVAR_GET(skate3_native_render_scene_sort_opaque),
+                           "Early-z rejects occluded pixels before the material shading"));
+
+  // ---- Perf logging / capture hotkeys ----
+  ImGui::SeparatorText("Perf logging & capture");
+  REXCVAR_SET(skate3_native_render_scene_perf_log,
+              CvarCheckbox("Per-frame perf log",
+                           REXCVAR_GET(skate3_native_render_scene_perf_log),
+                           "Emit per-frame render timing lines to the log "
+                           "every `perf_interval` frames"));
+  REXCVAR_SET(skate3_native_render_scene_perf_items,
+              CvarCheckbox("Per-item perf attribution",
+                           REXCVAR_GET(skate3_native_render_scene_perf_items),
+                           "Deep per-draw-item perf attribution in the log"));
+  REXCVAR_SET(skate3_native_render_capture_hotkeys,
+              CvarCheckbox("Snapshot hotkeys",
+                           REXCVAR_GET(skate3_native_render_capture_hotkeys),
+                           "Enable the hotkey-guided snapshot capture"));
+
+  ImGui::End();
 }
 
 void DrawDiagnosticsSection() {
@@ -1436,16 +1465,7 @@ void DrawDiagnosticsSection() {
     }
   }
 
-  ImGui::SeparatorText("Perf / image / capture diagnostics");
-  REXCVAR_SET(skate3_native_render_scene_perf_log,
-              CvarCheckbox("Per-frame perf log",
-                           REXCVAR_GET(skate3_native_render_scene_perf_log),
-                           "Emit per-frame render timing lines to the log "
-                           "every `perf_interval` frames"));
-  REXCVAR_SET(skate3_native_render_scene_perf_items,
-              CvarCheckbox("Per-item perf attribution",
-                           REXCVAR_GET(skate3_native_render_scene_perf_items),
-                           "Deep per-draw-item perf attribution in the log"));
+  ImGui::SeparatorText("Image / visual diagnostics");
   REXCVAR_SET(skate3_native_render_scene_ssao_debug,
               CvarCheckbox("SSAO debug view",
                            REXCVAR_GET(skate3_native_render_scene_ssao_debug),
@@ -1456,10 +1476,6 @@ void DrawDiagnosticsSection() {
                          0.0f, 2.0f, "%.2f",
                          "Sharper/magnified magnification for the 2D/HUD "
                          "layer (1.0 = none)"));
-  REXCVAR_SET(skate3_native_render_capture_hotkeys,
-              CvarCheckbox("Snapshot hotkeys",
-                           REXCVAR_GET(skate3_native_render_capture_hotkeys),
-                           "Enable the hotkey-guided snapshot capture"));
 
   ImGui::SeparatorText("Character shadow / lighting diagnostics");
   REXCVAR_SET(skate3_native_render_scene_shadow_caster_parity,
@@ -1580,10 +1596,15 @@ void NativeDebugDialog::OnDraw(ImGuiIO& io) {
                            "Skip emulated GPU work for framebuffer-sized passes while "
                            "native output is active (perf). Small-surface passes "
                            "(lightmap page composition) always run."));
-
-  if (ImGui::CollapsingHeader("Performance",
-                              ImGuiTreeNodeFlags_DefaultOpen)) {
-    DrawPerformanceSection(imgui_drawer()->presenter());
+  if (s_perf_window_open) {
+    ImGui::TextDisabled("Performance window open (separate 'Performance' window)");
+  } else if (ImGui::Button("Open Performance window")) {
+    s_perf_window_open = true;
+  }
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip(
+        "Open the standalone Performance dashboard (FPS, frame-time graph,\n"
+        "RHI timing, pacing and perf-logging controls).");
   }
   if (ImGui::CollapsingHeader("Showcase & capture",
                               ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1608,9 +1629,6 @@ void NativeDebugDialog::OnDraw(ImGuiIO& io) {
   if (ImGui::CollapsingHeader("Scene content & overlays")) {
     DrawSceneContentSection();
   }
-  if (ImGui::CollapsingHeader("Smoothness & pacing")) {
-    DrawPacingSection();
-  }
   if (ImGui::CollapsingHeader("Diagnostics")) {
     DrawDiagnosticsSection();
   }
@@ -1621,6 +1639,9 @@ void NativeDebugDialog::OnDraw(ImGuiIO& io) {
   ImGui::End();
   if (s_showcase_setup_open) {
     DrawShowcaseSetupWindow(&s_showcase_setup_open);
+  }
+  if (s_perf_window_open) {
+    DrawPerformanceWindow(&s_perf_window_open, imgui_drawer()->presenter());
   }
   if (!open) {
     Hide();

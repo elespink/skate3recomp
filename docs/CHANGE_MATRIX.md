@@ -1,7 +1,7 @@
 # Change Matrix — Skate 3 Native Recomp
 
-**Last updated:** 2026-09-04 (session 3). Committed: `ff389a4`. Uncommitted: none.
-**Base:** upstream `f6e0ae8` / v2.0.2. HEAD = `ff389a4`.
+**Last updated:** 2026-09-04 (session 4). Committed: pending. Uncommitted: perf window, rigid pivot.
+**Base:** upstream `f6e0ae8` / v2.0.2. HEAD = `61c7875` + work in progress.
 **Note:** I do NOT build in the VM — the build tree is host-keyed to `lespink`. Build fixes are log-only; user verifies by compiling on the host (clang++-21).
 
 ---
@@ -14,6 +14,8 @@
 | 2 | **Character-size bone-palette fix** | `scene_gpu.cpp` | Medium | Scales bone-palette translation around character root instead of world matrix. Fixes mesh flying off + camera/perspective breakage. Removed dead world-shadow code. |
 | 3 | **Deadcode tool fix** | `tests/check_deadcode.py` | None | Eliminated ~200 false-positive "unreferenced" entries from intra-TU static calls and function pointers. |
 | 4 | **Perf menu refactor (v2)** | `debug_dialog.cpp` | Low | MangoHUD-style consolidated "Performance" dashboard: big colored FPS, frame-time graph w/ 1%/0.1% lows, GPU resource bars, RHI drain/view graphs, fullscreen view trace, scene stats, pacing controls. Moved RHI diag out of Diagnostics, fps-cap out of Pacing. Sun/haze dedup verified clean. |
+| 5 | **Perf window (v3) — standalone** | `debug_dialog.cpp` | Low | Perf moved OUT of the F12 debug window into a dedicated standalone "Performance" window (opened via "Open Performance window" button in F12). Consolidated: pacing (smooth camera + filter + fps cap + opaque sort), perf-log + perf-items + capture-hotkeys all into Performance. Diagnostics keeps only visual views (SSAO debug, 2D sharp). Caches untouched. |
+| 6 | **Rigid-piece char-size pivot fix** | `scene.h`, `scene.cpp`, `scene_gpu.cpp` | Medium | Rigid (non-skinned) char_family 1/2 accessories now scale their world translation about the character's root bone (bone 0 of a same-entity skinned sibling), so hats/jewellery/rigid ropa track the scaled body. Added `DrawItem::root_pos[3]` + `root_valid`. Gated on `cs != 1.0`; falls back to pre-fix when no trusted root. Inert at cs=1. |
 
 ## REVERTED (do not re-add as-is)
 
@@ -46,7 +48,6 @@
 |------|-------------|-----------|
 | **Fix B3 (nude body preservation)** | FEASIBLE (research confirmed). `item.bones.size()/12` degenerate (always 84); real bone count at `mesh+0x48`. Per-entity grouping via `LookupCtx`. | One-frame `char_track` diagnostic dump to confirm body material, then implement per-entity max-real-bone prune in `BuildFrameScene`. |
 | **Scratch/blood body damage** | **FEASIBLE** — Path A recommended (agent C confirmed). Add wound slot to `DrawItem`, relax `AdoptDrawFetchOverrides` gate for `char_family==2`, add `overlay.w==5` wound branch in `scene_char.hlsli`. Three code paths suppress wounds but all are addressable. | F11 `.draws.bin` capture in emulated mode to confirm Path A (mesh decal) vs Path B (standalone overlay). Once confirmed, implement wound slot + shader branch (~medium effort). |
-| **Rigid-piece scale pivot divergence** | MAJOR (investigated). Rigid pieces (hats/jewellery/rigid ropa) have `constants[0..11] *= cs` which scales rotation/scale but NOT translation (`constants[12],[13],[14]`). Skinned items DO scale translations about root bone. Net: accessories stay fixed in world space while body scales → visible drift. Fix needs root-bone position for rigid pieces (not currently in `DrawItem`). | Read `docs/agent-reports/investigate-rigid-pivot.md` for full analysis + pseudo-code. Options: (a) look up sibling skinned item's root bone, (b) add `root_pos[3]` to `DrawItem`. Needs careful transform-math review. |
 | **Physics editor** | BLOCKED. `sub_82c67f10` is NOT a registered recomp function entry (mid-function code in fat aggregated body). | Find actual recomp entry via `PPCFuncMappings[]` or hook a different address. Research needed. |
 
 ## TEST SUITE STATUS
@@ -57,15 +58,18 @@
 | `check_deadcode.py` | PASS | FIXED crash: `.count()` on a `set` tokenizer (deduped) at line 170. Added `token_counts_in()` occurrence counter. Now clean EXIT=0. |
 | `run_tests.sh` | BROKEN | Bash syntax error when invoked via `python3`. Run with `bash tests/run_tests.sh` or run Python scripts directly. |
 
-## FILES CHANGED (all committed)
+## FILES CHANGED
 
 ```
- src/skate3_app_common.cpp              |   1 +-     (Ctrl+F10 key binding)
- src/skate3_native_debug_dialog.cpp     | 396 ++-     (perf v2 + build-fix cast)
- src/skate3_native_scene.cpp            |   3 +-     (bank overread cap)
- src/skate3_native_scene_gpu.cpp        | 170 ++-     (drain fix + char-size + dead param + F3 cs)
+ src/skate3_app_common.cpp              |   1 +-     (Ctrl+F10 key binding) [committed 58f8618]
+ src/skate3_native_debug_dialog.cpp     | 519 ++-     (perf v2 + v3 standalone window + build-fix)
+ src/skate3_native_scene.cpp            |  72 +-     (bank overread cap + root_pos population)
+ src/skate3_native_scene.h              |  12 +      (DrawItem::root_pos + root_valid)
+ src/skate3_native_scene_gpu.cpp        | 190 ++-     (drain + char-size + dead param + F3 cs + rigid pivot)
  src/skate3_native_scene_gpu_internal.h |  23 +      (OutputViewEntry for drain cache)
  src/skate3_native_scene_post.cpp       |  15 +-     (EnsureMenuBlurStandalone cache)
  src/skate3_native_scene_state.h        |   1 +      (#include <fstream> build fix)
  tests/check_deadcode.py                |  35 ++-     (false-positive elim + crash fix)
 ```
+
+Committed: `479af5f`, `58f8618`, `ff389a4`, `61c7875`. Pending: perf window v3 + rigid pivot.
