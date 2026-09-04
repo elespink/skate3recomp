@@ -746,7 +746,7 @@ void Skate3BaseApp::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
                               skate3_native_render_scene_freecam,
                               !REXCVAR_GET(skate3_native_render_scene_freecam));
                         });
-  rex::ui::RegisterBind("bind_skate3_toggle_2d", "F11",
+  rex::ui::RegisterBind("bind_skate3_toggle_2d", "Ctrl+F10",
                         "Toggle 2D/APT HUD overlay", [] {
                           REXCVAR_SET(
                               skate3_native_render_scene_2d,
