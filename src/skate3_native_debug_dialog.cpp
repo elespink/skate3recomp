@@ -313,9 +313,8 @@ void DrawMaxQualityToggle() {
 bool s_showcase_setup_open = false;
 
 // ---- Performance window ----------------------------------------------------
-// Standalone MangoHUD-style dashboard. Owned/modelled on the showcase setup
-// window: opened from the F12 menu, kept open independently of it.
-bool s_perf_window_open = false;
+// Standalone PERF menu (F2): MangoHUD-style dashboard, opened and closed by
+// the F2 key, fully independent of the F12 debug menu.
 
 struct ShowcaseRow {
   const skate3::native_scene::ShowcaseLayer* layer;
@@ -1036,9 +1035,10 @@ void DrawSceneContentSection() {
 // ---- Performance window (MangoHUD-style) -----------------------------------
 // Consolidated live readout: FPS counter, frame-time graph, RHI timing,
 // GPU resource ledger, scene stats. All data from already-available APIs.
-// Standalone window (like the showcase setup editor), opened from the F12
-// menu. Also hosts the pacing and perf-logging / capture-hotkey controls
-// that were previously spread across the F12 sections.
+// Standalone PERF menu (F2), opened and closed by the F2 key, fully
+// independent of the F12 debug menu. Also hosts the pacing and perf-logging
+// / capture-hotkey controls that were previously spread across the F12
+// sections.
 void DrawPerformanceWindow(bool* p_open, rex::ui::Presenter* presenter) {
   using rex::graphics::vulkan::NrDeviceDiag;
 
@@ -1561,6 +1561,38 @@ void NativeDebugDialog::Toggle() {
   }
 }
 
+void PerformanceDialog::Show() {
+  visible_ = true;
+  SetDrawActive(true);
+}
+
+void PerformanceDialog::Hide() {
+  if (!visible_) {
+    return;
+  }
+  visible_ = false;
+  SetDrawActive(false);
+}
+
+void PerformanceDialog::Toggle() {
+  if (visible_) {
+    Hide();
+  } else {
+    Show();
+  }
+}
+
+void PerformanceDialog::OnDraw(ImGuiIO& io) {
+  (void)io;
+  if (!visible_) {
+    return;
+  }
+  DrawPerformanceWindow(&visible_, imgui_drawer()->presenter());
+  if (!visible_) {
+    Hide();
+  }
+}
+
 void NativeDebugDialog::OnDraw(ImGuiIO& io) {
   (void)io;
   if (!visible_) {
@@ -1596,16 +1628,6 @@ void NativeDebugDialog::OnDraw(ImGuiIO& io) {
                            "Skip emulated GPU work for framebuffer-sized passes while "
                            "native output is active (perf). Small-surface passes "
                            "(lightmap page composition) always run."));
-  if (s_perf_window_open) {
-    ImGui::TextDisabled("Performance window open (separate 'Performance' window)");
-  } else if (ImGui::Button("Open Performance window")) {
-    s_perf_window_open = true;
-  }
-  if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip(
-        "Open the standalone Performance dashboard (FPS, frame-time graph,\n"
-        "RHI timing, pacing and perf-logging controls).");
-  }
   if (ImGui::CollapsingHeader("Showcase & capture",
                               ImGuiTreeNodeFlags_DefaultOpen)) {
     DrawShowcaseCaptureSection();
@@ -1639,9 +1661,6 @@ void NativeDebugDialog::OnDraw(ImGuiIO& io) {
   ImGui::End();
   if (s_showcase_setup_open) {
     DrawShowcaseSetupWindow(&s_showcase_setup_open);
-  }
-  if (s_perf_window_open) {
-    DrawPerformanceWindow(&s_perf_window_open, imgui_drawer()->presenter());
   }
   if (!open) {
     Hide();

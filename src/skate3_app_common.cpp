@@ -727,6 +727,9 @@ void Skate3BaseApp::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
                         "Native render debug menu", [this] {
                           ToggleNativeDebug();
                         });
+  rex::ui::RegisterBind("bind_skate3_perf_menu", "F2", "Performance menu", [this] {
+    TogglePerformanceWindow();
+  });
   rex::ui::RegisterBind("bind_skate3_showcase", "Ctrl+Shift+B",
                         "Graphics build-up showcase", [] {
                           // A capture/recording tool, not a player feature:
@@ -746,7 +749,7 @@ void Skate3BaseApp::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
                               skate3_native_render_scene_freecam,
                               !REXCVAR_GET(skate3_native_render_scene_freecam));
                         });
-  rex::ui::RegisterBind("bind_skate3_toggle_2d", "Ctrl+F10",
+  rex::ui::RegisterBind("bind_skate3_toggle_2d", "F4",
                         "Toggle 2D/APT HUD overlay", [] {
                           REXCVAR_SET(
                               skate3_native_render_scene_2d,
@@ -844,10 +847,12 @@ void Skate3BaseApp::OnShutdown() {
   rex::ui::UnregisterBind("bind_skate3_log_debug_marker");
   rex::ui::UnregisterBind("bind_skate3_log_user_marker");
   rex::ui::UnregisterBind("bind_skate3_native_debug");
+  rex::ui::UnregisterBind("bind_skate3_perf_menu");
   ApplyGameplayCursorMode();
   skate3::native_scene::SetSettingsMenuBlur(false);
   simple_settings_dialog_.reset();
   native_debug_dialog_.reset();
+  performance_dialog_.reset();
   render_mode_indicator_.reset();
 }
 
@@ -965,6 +970,20 @@ void Skate3BaseApp::ToggleNativeDebug() {
   } else {
     ApplySettingsCursorMode();
     native_debug_dialog_->Show();
+  }
+}
+
+void Skate3BaseApp::TogglePerformanceWindow() {
+  if (!performance_dialog_) {
+    performance_dialog_ =
+        std::make_unique<skate3::PerformanceDialog>(imgui_drawer());
+  }
+  if (performance_dialog_->visible()) {
+    performance_dialog_->Hide();
+    ApplyGameplayCursorMode();
+  } else {
+    ApplySettingsCursorMode();
+    performance_dialog_->Show();
   }
 }
 
