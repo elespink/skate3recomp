@@ -632,6 +632,35 @@ void CommitStagedGuestTexture(const NativeGuestOutputRenderContext& context,
   gt.valid = true;
 }
 
+// In-place commit for a words-keyed content swap: the caller already has a
+// valid cached decode whose fetch words (thus layout) are identical to the
+// staged one, so the new decode's mips are re-uploaded into the EXISTING
+// texture and its SRV slot is kept - instead of retiring the view and
+// creating a fresh texture+view, whose destruction DrainRetired pays the
+// next frame. Mirrors CommitStagedGuestTexture's copy plan, but the target
+// has been sampled by earlier draws this frame, so both sides of the copy
+// are explicit barriers (same semantics as a retire+recreate mid-frame).
+// Returns false if the caller must fall back to retire+recreate.
+bool UploadStagedGuestTextureInPlace(const NativeGuestOutputRenderContext& context,
+                                     nrhi::Texture* tex, nrhi::Buffer* upload,
+                                     const StagedTexCommit& sc) {
+  if (tex == nullptr || upload == nullptr || sc.cube || sc.mip_count == 0) {
+    return false;
+  }
+  context.cmd->Barrier(tex, nrhi::ResourceState::kPixelShaderResource,
+                       nrhi::ResourceState::kCopyDest);
+  context.cmd->FlushBarriers();
+  for (uint32_t m = 0; m < sc.mip_count; ++m) {
+    const StagedMipCopy& p = sc.mips[m];
+    context.cmd->CopyBufferToTexture(tex, m, 0, upload, p.offset, p.pitch, p.w,
+                                     p.h, 1);
+  }
+  context.cmd->Barrier(tex, nrhi::ResourceState::kCopyDest,
+                       nrhi::ResourceState::kPixelShaderResource);
+  context.cmd->FlushBarriers();
+  return true;
+}
+
 // Worker-pool result plumbing (see the prewarm queue globals above; these
 // live here because they need the resource/item types).
 struct StagedTexResult {
@@ -5005,6 +5034,33 @@ void PrewarmCommit(const NativeGuestOutputRenderContext& context,
                   "native-scene: texture heal commit key={:016X} fp {:016X} "
                   "-> {:016X}",
                   t.words_key, wit->second.payload_fp, t.gt.payload_fp);
+            }
+            // The new decode's layout is identical to the cached one (same
+            // fetch words = same key = same format/dims/mips), so re-upload
+            // it into the EXISTING texture and keep the SRV slot, dropping
+            // the retire+recreate that left DrainRetired a fresh view+texture
+            // to destroy next frame. Guards are belt-and-suspenders; anything
+            // unexpected (a tex_mips/format toggle between polls) falls back
+            // to the retire+recreate below.
+            if (wit->second.texture != nullptr && wit->second.srv != nullptr &&
+                t.gt.texture != nullptr && t.gt.upload != nullptr &&
+                !t.commit.cube && t.commit.mip_count >= 1 &&
+                wit->second.srv_format == t.commit.srv_format &&
+                wit->second.srv_mips == t.commit.mip_count &&
+                wit->second.texture->width() == t.commit.mips[0].w &&
+                wit->second.texture->height() == t.commit.mips[0].h &&
+                UploadStagedGuestTextureInPlace(context, wit->second.texture,
+                                                t.gt.upload, t.commit)) {
+              g_r.device->DestroyDeferred(t.gt.texture);
+              g_r.device->DestroyDeferred(t.gt.upload);
+              wit->second.payload_fp = t.gt.payload_fp;
+              wit->second.near_black = t.gt.near_black;
+              wit->second.incomplete = t.gt.incomplete;
+              wit->second.fail_count = t.gt.fail_count;
+              wit->second.recheck_frame = 0;
+              wit->second.last_change_frame = frame_number;
+              committed_tex = true;
+              continue;
             }
           }
           if (!t.valid) {
