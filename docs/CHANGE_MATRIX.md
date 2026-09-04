@@ -44,6 +44,7 @@
 | `ff389a4` | fix: constant-bank overread cap, dead submission param, F3 shadow-bone cs validation |
 | `61c7875` | docs: change matrix through ff389a4 |
 | `1f5bab8` | feat: standalone Performance window, rigid-piece char-size pivot |
+| `8a8d82c` | feat: PERF menu on F2, perf decoupled from F12, 2D HUD toggle on F4 |
 
 ---
 
