@@ -4221,7 +4221,8 @@ bool CaptureSkinnedState(uint8_t* base, uint32_t bank, uint32_t palette_base,
       return false;
     }
   }
-  constexpr uint32_t kPaletteFloats = 84 * 12;  // c4..c255 = up to 84 bones
+  const uint32_t kPaletteFloats =
+      std::min(84u, (256u - palette_base) / 4u) * 12u;  // cap to bank end
   item.bones.resize(kPaletteFloats);
   for (uint32_t i = 0; i < kPaletteFloats; ++i) {
     const float f = LoadGuestF32(base, bank + (palette_base * 4 + i) * 4);

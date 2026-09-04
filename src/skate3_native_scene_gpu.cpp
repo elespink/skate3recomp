@@ -199,6 +199,7 @@ void RetireGuestTexture(const GuestTexture& t) {
 struct F3ShadowBoneEntry {
   const DrawItem* item;
   uint32_t offset;
+  float cs;
 };
 static std::vector<F3ShadowBoneEntry> g_f3_shadow_bones;
 
@@ -336,7 +337,7 @@ uint32_t GuestTextureGpuBytes(const GuestTexture& t, uint32_t faces = 1) {
   return bytes > UINT32_MAX ? UINT32_MAX : uint32_t(bytes);
 }
 
-void EvictTexStore(uint64_t frame_number, uint64_t submission) {
+void EvictTexStore(uint64_t frame_number) {
   static bool s_evicting = false;
   static uint64_t s_next_scan_frame = 0;
   static uint64_t s_evicted_run = 0;
@@ -535,7 +536,7 @@ void EvictMeshStore(uint64_t frame_number) {
 // idle guard keeps anything recently sampled resident.
 constexpr size_t kCubeStoreCap = 48;
 
-void EvictCubeStore(uint64_t frame_number, uint64_t submission) {
+void EvictCubeStore(uint64_t frame_number) {
   if (g_r.cube_textures.size() <= kCubeStoreCap) {
     return;
   }
@@ -6718,7 +6719,11 @@ bool RenderShadowAtlas(const NativeGuestOutputRenderContext& context,
         // F3: publish this item's ring offset so the MAIN pass can reuse it
         // instead of duplicating the identical bone palette later this frame
         // (same item, same immutable scene.items, shadow pass runs first).
-        g_f3_shadow_bones.push_back(F3ShadowBoneEntry{&item, offset});
+        // Record the cs value used during the shadow pass so the main pass can
+        // reject the reuse if the cvar changed between passes this frame.
+        const float pub_cs = float(REXCVAR_GET(
+            skate3_native_render_scene_character_size));
+        g_f3_shadow_bones.push_back(F3ShadowBoneEntry{&item, offset, pub_cs});
       }
       casters.push_back(c);
     }
@@ -7998,9 +8003,9 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
   // detail sets, one-shot UI art) age out once nothing routes to them; the
   // mesh cache ages out streamed-out arenas the same way.
   UpdateEvictFpsEstimate(frame_number);
-  EvictTexStore(frame_number, context.device->CurrentSubmission());
+  EvictTexStore(frame_number);
   EvictMeshStore(frame_number);
-  EvictCubeStore(frame_number, context.device->CurrentSubmission());
+  EvictCubeStore(frame_number);
 
   bool shadow_ready = false;
   uint32_t shadow_draws = 0;
@@ -9020,8 +9025,10 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
       // shadow pass), so no data is duplicated and no ring space is wasted.
       uint32_t bound_offset = 0;
       bool reused = false;
+      const float cur_cs = float(REXCVAR_GET(
+          skate3_native_render_scene_character_size));
       for (const F3ShadowBoneEntry& e : g_f3_shadow_bones) {
-        if (e.item == &item) {
+        if (e.item == &item && e.cs == cur_cs) {
           bound_offset = e.offset;
           reused = true;
           break;

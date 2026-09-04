@@ -1,7 +1,7 @@
 # Change Matrix — Skate 3 Native Recomp
 
-**Last updated:** 2026-09-04 (session 2). All uncommitted; user building locally.
-**Base:** upstream `f6e0ae8` / v2.0.2. HEAD = `e81ad7a` (docs) + uncommitted WIP.
+**Last updated:** 2026-09-04 (session 3). Committed: `58f8618` (key binding). Uncommitted: none.
+**Base:** upstream `f6e0ae8` / v2.0.2. HEAD = `58f8618`.
 **Note:** I do NOT build in the VM — the build tree is host-keyed to `lespink`. Build fixes are log-only; user verifies by compiling on the host (clang++-21).
 
 ---
@@ -36,6 +36,8 @@
 | `f7cf9d5` | Change matrix + milestone verification docs |
 | `d20d0cc` | Live F12 RHI diagnostics — drain/view-churn perf ring, fullscreen view trace, resource ledger |
 | `e81ad7a` | Docs: change matrix through d20d0cc |
+| `479af5f` | feat: drain/output-SRV cache, character-size root-pivot scaling, F12 perf v2, build + deadcode fixes |
+| `58f8618` | fix: move 2D toggle to Ctrl+F10, freeing F11 for draw capture |
 
 ## NOT IMPLEMENTED — needs action
 
@@ -61,15 +63,14 @@
 | `check_deadcode.py` | PASS | FIXED crash: `.count()` on a `set` tokenizer (deduped) at line 170. Added `token_counts_in()` occurrence counter. Now clean EXIT=0. |
 | `run_tests.sh` | BROKEN | Bash syntax error when invoked via `python3`. Run with `bash tests/run_tests.sh` or run Python scripts directly. |
 
-## FILES CHANGED (uncommitted)
+## FILES CHANGED (all committed)
 
 ```
- CMakeLists.txt                         |   1 +        (reverted with physics editor)
- src/skate3_native_debug_dialog.cpp     | 396 ++-      (perf v2 + build-fix cast at 1129/1130)
- src/skate3_native_scene_gpu.cpp        | 151 ++-      (cast fix for bone_ring_cpu floats)
- src/skate3_native_scene_gpu_internal.h |  23 +
- src/skate3_native_scene_post.cpp       |  15 +-
- src/skate3_native_scene_state.h        |   1 +         (#include <fstream> build fix)
- tests/check_deadcode.py                |  35 +-
- third_party/rexglue-sdk                |   0 (dirty by design)
+ src/skate3_app_common.cpp              |   1 +-     (Ctrl+F10 key binding)
+ src/skate3_native_debug_dialog.cpp     | 396 ++-     (perf v2 + build-fix cast)
+ src/skate3_native_scene_gpu.cpp        | 151 ++-     (drain fix + character-size + cast fix)
+ src/skate3_native_scene_gpu_internal.h |  23 +      (OutputViewEntry for drain cache)
+ src/skate3_native_scene_post.cpp       |  15 +-     (EnsureMenuBlurStandalone cache)
+ src/skate3_native_scene_state.h        |   1 +      (#include <fstream> build fix)
+ tests/check_deadcode.py                |  35 ++-     (false-positive elim + crash fix)
 ```
