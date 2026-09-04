@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -9,6 +10,7 @@
 
 #include <rex/cvar.h>
 #include <rex/graphics/native_guest_renderer.h>
+#include <rex/graphics/vulkan/native_rhi_vulkan.h>
 #include <rex/logging.h>
 #include <rex/ui/presenter.h>
 
@@ -1244,6 +1246,87 @@ void DrawDiagnosticsSection() {
                            REXCVAR_GET(skate3_native_render_scene_caster_refresh_all),
                            "Palette-refresh coverage for character shadow "
                            "casters"));
+
+  ImGui::SeparatorText("RHI / drain diagnostics (live)");
+  {
+    using rex::graphics::vulkan::NrDeviceDiag;
+    rex::graphics::nrhi::Device* dev = skate3::native_scene::GetNativeSceneDevice();
+    rex::graphics::vulkan::NrDeviceDiag diag{};
+    if (dev != nullptr &&
+        rex::graphics::vulkan::GetNativeRhiDiagnostics(dev, &diag)) {
+      // ---- Live perf graph (drain / view_destroy / view_create) ----
+      const uint32_t n = std::min<uint32_t>(diag.ring_frames, NrDeviceDiag::kRingFrames);
+      if (n > 0) {
+        std::vector<float> drain(n), vd(n), vc(n);
+        uint32_t idx = diag.ring_frames >= NrDeviceDiag::kRingFrames
+                           ? diag.ring_frames % NrDeviceDiag::kRingFrames
+                           : 0;
+        for (uint32_t i = 0; i < n; ++i) {
+          const auto& s = diag.ring[(idx + i) % NrDeviceDiag::kRingFrames];
+          drain[i] = float(s.drain_us);
+          vd[i] = float(s.view_destroy_us);
+          vc[i] = float(s.view_create_us);
+        }
+        ImGui::TextDisabled("framebuffer-sized view churn (us/frame)");
+        ImGui::PlotHistogram("drain (ms)", drain.data(), (int)n, 0, nullptr,
+                             0.0f, 20000.0f, ImVec2(0, 56));
+        ImGui::PlotHistogram("view_destroy", vd.data(), (int)n, 0, nullptr,
+                             0.0f, 20000.0f, ImVec2(0, 56));
+        ImGui::PlotHistogram("view_create", vc.data(), (int)n, 0, nullptr,
+                             0.0f, 20000.0f, ImVec2(0, 56));
+        const auto& last = diag.ring[(diag.ring_frames - 1) % NrDeviceDiag::kRingFrames];
+        ImGui::Text(
+            "last: drain=%.2fms(%u) vd=%.2fms(%u) vc=%.2fms(%u) total=%.2fms",
+            last.drain_us / 1000.0f, last.drain_calls, last.view_destroy_us / 1000.0f,
+            last.view_destroy_calls, last.view_create_us / 1000.0f, last.view_create_calls,
+            last.total_us / 1000.0f);
+      }
+
+      // ---- RHI resource ledger ----
+      ImGui::Text(
+          "live textures=%u views=%u bufs=%u  retired_backlog=%u dissolved_pending=%u",
+          diag.live_textures, diag.live_views, diag.live_buffers, diag.retired_backlog,
+          diag.dissolved_pending);
+
+      // ---- Fullscreen view churn trace (>=1600 image views created/destroyed) ----
+      const int tc = diag.trace_count;
+      if (tc > 0) {
+        char hdr[64];
+        std::snprintf(hdr, sizeof(hdr), "fullscreen view trace (last %d)",
+                      std::min(tc, NrDeviceDiag::kTraceN));
+        if (ImGui::CollapsingHeader(hdr, ImGuiTreeNodeFlags_None)) {
+          if (ImGui::BeginTable("fv_trace", 5,
+                                ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders)) {
+            ImGui::TableSetupColumn("kind");
+            ImGui::TableSetupColumn("w");
+            ImGui::TableSetupColumn("h");
+            ImGui::TableSetupColumn("format");
+            ImGui::TableSetupColumn("frame");
+            ImGui::TableHeadersRow();
+            const int total = std::min(tc, NrDeviceDiag::kTraceN);
+            const int start = total >= NrDeviceDiag::kTraceN ? tc % NrDeviceDiag::kTraceN : 0;
+            for (int i = 0; i < total; ++i) {
+              const auto& e = diag.trace[(start + i) % NrDeviceDiag::kTraceN];
+              ImGui::TableNextRow();
+              ImGui::TableNextColumn();
+              ImGui::TextUnformatted(e.destroyed ? "destroy" : "create");
+              ImGui::TableNextColumn();
+              ImGui::Text("%u", e.w);
+              ImGui::TableNextColumn();
+              ImGui::Text("%u", e.h);
+              ImGui::TableNextColumn();
+              ImGui::Text("%u", e.format);
+              ImGui::TableNextColumn();
+              ImGui::Text("%llu", (unsigned long long)e.frame);
+            }
+            ImGui::EndTable();
+          }
+        }
+      }
+    } else {
+      ImGui::TextDisabled("RHI diagnostics unavailable (no native device yet, or non-Vulkan).");
+    }
+  }
 }
 
 void DrawCachesSection() {

@@ -11692,6 +11692,8 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
 
 bool SceneFailed() { return g_r.failed; }
 
+nrhi::Device* GetNativeSceneDevice() { return g_r.device; }
+
 void ResetSceneFailure() {
   if (g_r.failed) {
     g_r.failed = false;
@@ -11722,6 +11724,7 @@ namespace skate3::native_scene {
 void Install() {}
 bool SceneFailed() { return false; }
 void ResetSceneFailure() {}
+nrhi::Device* GetNativeSceneDevice() { return nullptr; }
 }  // namespace skate3::native_scene
 
 #endif  // REX_HAS_D3D12 || REX_HAS_VULKAN

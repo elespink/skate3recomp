@@ -11,6 +11,10 @@
 #include <cstdint>
 #include <vector>
 
+namespace rex::graphics::nrhi {
+class Device;
+}
+
 namespace skate3::native_scene {
 
 struct DrawEntry {
@@ -695,6 +699,10 @@ void Install();
 // new state; refuses (returns false) when the skate3_native_render hook
 // layer was not enabled at boot.
 bool ToggleSceneEnabled();
+
+// Current native RHI device (null until the scene pipeline has built).
+// Used by the F12 diagnostics overlay to pull live per-frame perf/ledger data.
+rex::graphics::nrhi::Device* GetNativeSceneDevice();
 
 // True once the scene renderer has hit an unrecoverable pipeline/resource
 // failure and yields to the emulated output until re-enabled. Surfaced so
