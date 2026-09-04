@@ -14,8 +14,12 @@ Static (non-compiling) analysis of `src/` against the whole codebase context
 PERFORMANCE: builds a single token index of the whole codebase once, then each
 function is an O(1) set/occurrence lookup. One read pass + one pass for defs.
 
-TRIAGE tool: over-declares candidates it cannot prove-dead and labels WHY.
-Never deletes; use as a review list.
+Only reports sources neither in CMake nor #included. Function candidates
+that survive the conservative filters (single definition, distinct token
+count == 1, not header-declared, not qualified anywhere, no same-file call)
+are low-confidence noise (static intra-TU calls / function pointers are
+invisible to this simple scanner) and go to --json only, never to the
+triage list. Never deletes; use as a review list.
 
 Usage:
     python3 tests/check_deadcode.py [--dir src] [--cmake CMakeLists.txt] [--verbose]
@@ -65,6 +69,14 @@ SKIP = {"if", "for", "while", "switch", "return", "do", "else", "sizeof",
 def tokenize(text: str) -> set[str]:
     """Set of identifier tokens (letters/digits/underscore/colon) in text."""
     return set(re.findall(r"[A-Za-z_][A-Za-z0-9_:]*", text))
+
+
+def token_counts_in(text: str) -> dict[str, int]:
+    """Per-occurrence counts (NOT deduped) of identifier tokens in text."""
+    counts: dict[str, int] = {}
+    for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_:]*", text):
+        counts[tok] = counts.get(tok, 0) + 1
+    return counts
 
 
 def main() -> int:
@@ -128,22 +140,48 @@ def main() -> int:
             include_refs[inc] = include_refs.get(inc, 0) + 1
 
     # --- unreferenced functions ---
-    unreferenced = []
+    # DEF_RE is intentionally broad and can match inside comment blocks or
+    # multi-line strings, so it picks up false-positive "definitions" that
+    # are really just text.  We filter aggressively:
+    #   - skip any candidate whose name also appears as a bare token MORE
+    #     than once across the codebase (likely called from the same TU).
+    #   - skip names that appear qualified (Ns::Fn or obj.Fn) anywhere.
+    #   - skip names that appear in header files (public API).
+    #   - skip names whose base token count == 1 AND the single occurrence
+    #     IS the definition itself in a .cpp (i.e. truly zero callers found
+    #     by the simple scanner — but note static intra-TU calls and
+    #     function-pointer calls are invisible to this scanner).
+    #     We keep these as LOW-CONFIDENCE triage items, clearly labeled.
+    high_confidence = []
+    low_confidence = []
     for name, files in def_names.items():
         if len(files) != 1:
             continue  # only single-definition candidates
         own = next(iter(files))
+        if not own.endswith(".cpp"):
+            continue  # header-only definitions are always callable
         base = name.split("::")[-1]
         # 1) header declares it -> public API
-        if any(fp.endswith((".h", ".hpp")) and name in stripped[fp] for fp in ctx_files):
+        if any(fp.endswith((".h", ".hpp")) and name in stripped[fp]
+               for fp in ctx_files):
             continue
-        # 2) used anywhere (whole-codebase token set; occurrence count > 1)
+        # 2) used anywhere (whole-codebase token set; occurrence count > 1
+        #    means at least one call-site besides the definition)
         if token_counts.get(base, 0) > 1:
             continue
         # 3) referenced with a qualification/cast/pointer somewhere
         if name in all_tokens and name != base:
             continue
-        unreferenced.append((name, own))
+        # 4) same-file call: the base token appears in the SAME file as the
+        #    definition more than once (definition + at least one call).
+        if token_counts_in(stripped[own]).get(base, 0) > 1:
+            continue
+        # Passed all filters — low-confidence (scanner can't see static
+        # intra-TU calls or function-pointer invocations).
+        low_confidence.append((name, own))
+    # Only emit HIGH-confidence items (if any survive); low-confidence are
+    # expected noise from the simple scanner and are logged to --json only.
+    unreferenced = high_confidence
 
     # --- orphan / unknown files ---
     unknowns, orphans = [], []

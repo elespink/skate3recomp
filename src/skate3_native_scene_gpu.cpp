@@ -4275,22 +4275,68 @@ bool EnsurePipeline(const NativeGuestOutputRenderContext& context) {
     return false;
   }
 
-  if (g_r.rtv_resource != context.guest_output) {
-    // The presenter recreated the output image (resize). Render-target
-    // binding is by texture now (the old heap-slot-0 RTV is gone); re-point
-    // the cached identity and the sampled view of the output (blur source /
-    // photo passes).
-    if (g_r.output_srv_slot) {
-      device->DestroyDeferred(g_r.output_srv_slot);
-      g_r.output_srv_slot = nullptr;
-    }
-    nrhi::TextureViewDesc vd;
-    vd.mip_levels = 1;
-    g_r.output_srv_slot = device->CreateTextureView(context.guest_output, vd);
-    g_r.output_srv_allocated = g_r.output_srv_slot != nullptr;
-    g_r.rtv_resource = context.guest_output;
+  if (g_r.output_views.empty()) {
+    g_r.output_views.reserve(8);
   }
+  g_r.output_srv_slot = EnsureOutputSrvView(context);
   return true;
+}
+
+// Sampled view of the current guest-output texture, backed by the
+// per-mailbox-image cache. The Vulkan presenter rotates among a small set of
+// guest-output images (a 3-image mailbox) on every refresh, so
+// context.guest_output toggles between those images each frame. The old code
+// recreated output_srv_slot whenever the identity changed, which fired on
+// every rotation and turned each frame into a fullscreen VkImageView
+// create+destroy (the recurring DrainRetired micro-stutter). Here the view is
+// cached per output texture and reused on rotation; a view is created only
+// when a genuinely NEW output texture (a resize) appears.
+nrhi::TextureView* EnsureOutputSrvView(const NativeGuestOutputRenderContext& context) {
+  nrhi::Device* device = context.device;
+  if (context.guest_output == nullptr) {
+    return nullptr;
+  }
+  ++g_r.output_view_seq;
+  // Reuse the cached view for this exact output texture (mailbox rotation).
+  for (auto& e : g_r.output_views) {
+    if (e.tex == context.guest_output) {
+      e.seq = g_r.output_view_seq;
+      g_r.output_srv_slot = e.view;
+      g_r.output_srv_allocated = e.view != nullptr;
+      g_r.rtv_resource = context.guest_output;
+      return e.view;
+    }
+  }
+  // Not seen before: create a view for this output texture and cache it.
+  nrhi::TextureViewDesc vd;
+  vd.mip_levels = 1;
+  nrhi::TextureView* view = device->CreateTextureView(context.guest_output, vd);
+  // The presenter's mailbox is 3 images; allow one extra for a same-frame
+  // replacement just observed during a resize.
+  constexpr size_t kOutputViewCap = 4;
+  bool evicted = false;
+  if (g_r.output_views.size() >= kOutputViewCap) {
+    // Evict the least-recently-used entry to make room. The old view is
+    // FORGOTTEN (its pointer dropped), not deferred-destroyed: the RHI owns
+    // the guest-output wrapper lifetime and may release an out-of-date
+    // wrapper's texture before we next return here, so a deferred destroy
+    // (which reads back through the wrapper) would be unsafe.
+    size_t oldest = 0;
+    for (size_t i = 1; i < g_r.output_views.size(); ++i) {
+      if (g_r.output_views[i].seq < g_r.output_views[oldest].seq) {
+        oldest = i;
+      }
+    }
+    g_r.output_views[oldest] = {context.guest_output, view, g_r.output_view_seq};
+    evicted = true;
+  }
+  if (!evicted) {
+    g_r.output_views.push_back({context.guest_output, view, g_r.output_view_seq});
+  }
+  g_r.output_srv_slot = view;
+  g_r.output_srv_allocated = view != nullptr;
+  g_r.rtv_resource = context.guest_output;
+  return view;
 }
 
 namespace {
@@ -6643,6 +6689,29 @@ bool RenderShadowAtlas(const NativeGuestOutputRenderContext& context,
           continue;
         }
         std::memcpy(g_r.bone_ring_cpu + bone_region + offset, item.bones.data(), bytes);
+        // Character-size scaling for skinned items: scale bone translations
+        // around the root bone (bone 0) position so the character grows/shrinks
+        // around its own root, not the world origin.
+        if ((item.char_family == 1 || item.char_family == 2) &&
+            item.bones.size() >= 12) {
+          const float cs = float(REXCVAR_GET(
+              skate3_native_render_scene_character_size));
+          if (cs != 1.0f) {
+            auto* dst = reinterpret_cast<float*>(g_r.bone_ring_cpu + bone_region + offset);
+            const size_t nb = item.bones.size() / 12;
+            const float root[3] = {dst[3], dst[7], dst[11]};
+            for (size_t b = 0; b < nb; ++b) {
+              const size_t base = b * 12;
+              for (int r = 0; r < 3; ++r) {
+                for (int c = 0; c < 3; ++c) {
+                  dst[base + r * 4 + c] *= cs;
+                }
+                float& t = dst[base + r * 4 + 3];
+                t = root[r] + (t - root[r]) * cs;
+              }
+            }
+          }
+        }
         g_r.bone_ring_offset = offset + bytes;
         c.bone_offset = offset;
         c.bones = true;
@@ -6713,12 +6782,24 @@ bool RenderShadowAtlas(const NativeGuestOutputRenderContext& context,
             // behind the sim by design (dyn decode jobs).
             float constants[52] = {};
             std::memcpy(constants, c.item->world, sizeof(c.item->world));
+            // Character-size scaling for non-skinned char_family items in the
+            // shadow pass (skinned items are scaled via bone palette upload).
+            if ((c.item->char_family == 1 || c.item->char_family == 2) &&
+                !c.item->skinned) {
+              const float cs = float(REXCVAR_GET(
+                  skate3_native_render_scene_character_size));
+              if (cs != 1.0f) {
+                for (int i = 0; i < 12; ++i) {
+                  constants[i] *= cs;
+                }
+              }
+            }
             float* mvp = constants + 16;
             for (int r = 0; r < 4; ++r) {
               for (int col = 0; col < 4; ++col) {
                 float sum = 0.0f;
                 for (int k = 0; k < 4; ++k) {
-                  sum += c.item->world[r * 4 + k] * lightvp[k * 4 + col];
+                  sum += constants[r * 4 + k] * lightvp[k * 4 + col];
                 }
                 mvp[r * 4 + col] = sum;
               }
@@ -6952,15 +7033,6 @@ bool RenderShadowAtlas(const NativeGuestOutputRenderContext& context,
         }
         float constants[52] = {};
         std::memcpy(constants, item.world, sizeof(item.world));
-        if ((item.char_family == 1 || item.char_family == 2)) {
-          const float cs = float(REXCVAR_GET(
-              skate3_native_render_scene_character_size));
-          if (cs != 1.0f) {
-            for (int i = 0; i < 12; ++i) {
-              constants[i] *= cs;
-            }
-          }
-        }
         float* mvp = constants + 16;
         for (int r = 0; r < 4; ++r) {
           for (int col = 0; col < 4; ++col) {
@@ -8899,9 +8971,12 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
     }
     float constants[52] = {};
     std::memcpy(constants, item.world, sizeof(item.world));
-    // Character size scaling: scale skater/NPC 3x3 linear rows (world[0..11])
-    // for char_family 1/2 items when the multiplier is not 1.0.
-    if ((item.char_family == 1 || item.char_family == 2)) {
+    // Character size scaling: for non-skinned char_family 1/2 items, scale
+    // the world 3x3 linear rows (correct for rigid pieces positioned by the
+    // world matrix). Skinned items are scaled via the bone palette instead
+    // (see bone-upload sites below) to avoid breaking bone-placed vertices
+    // that are already in absolute world space.
+    if ((item.char_family == 1 || item.char_family == 2) && !item.skinned) {
       const float cs = float(REXCVAR_GET(
           skate3_native_render_scene_character_size));
       if (cs != 1.0f) {
@@ -8958,6 +9033,28 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
         if (offset + bytes <= RendererState::kBoneRegionSize) {
           std::memcpy(g_r.bone_ring_cpu + bone_region + offset,
                       item.bones.data(), bytes);
+          // Character-size scaling for skinned items not already uploaded by
+          // the shadow pass: scale bone translations around root bone.
+          if ((item.char_family == 1 || item.char_family == 2) &&
+              item.bones.size() >= 12) {
+            const float cs = float(REXCVAR_GET(
+                skate3_native_render_scene_character_size));
+            if (cs != 1.0f) {
+              auto* dst = reinterpret_cast<float*>(g_r.bone_ring_cpu + bone_region + offset);
+              const size_t nb = item.bones.size() / 12;
+              const float root[3] = {dst[3], dst[7], dst[11]};
+              for (size_t b = 0; b < nb; ++b) {
+                const size_t base = b * 12;
+                for (int r = 0; r < 3; ++r) {
+                  for (int c = 0; c < 3; ++c) {
+                    dst[base + r * 4 + c] *= cs;
+                  }
+                  float& t = dst[base + r * 4 + 3];
+                  t = root[r] + (t - root[r]) * cs;
+                }
+              }
+            }
+          }
           g_r.bone_ring_offset = offset + bytes;
           bound_offset = offset;
           reused = true;
