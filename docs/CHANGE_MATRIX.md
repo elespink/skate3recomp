@@ -1,12 +1,12 @@
 # Change Matrix — Skate 3 Native Recomp
 
-**Last updated:** 2026-09-04 (session 4). Committed: pending. Uncommitted: perf window, rigid pivot.
-**Base:** upstream `f6e0ae8` / v2.0.2. HEAD = `61c7875` + work in progress.
+**Last updated:** 2026-09-04 (session 4). Committed: `1f5bab8`. Uncommitted: none (SDK submodule dirty by design).
+**Base:** upstream `f6e0ae8` / v2.0.2. HEAD = `1f5bab8`.
 **Note:** I do NOT build in the VM — the build tree is host-keyed to `lespink`. Build fixes are log-only; user verifies by compiling on the host (clang++-21).
 
 ---
 
-## IMPLEMENTED (uncommitted, user building)
+## IMPLEMENTED (committed in `61c7875`→`1f5bab8`, user building)
 
 | # | Feature | Files | Risk | Status |
 |---|---------|-------|------|--------|
@@ -41,8 +41,12 @@
 | `479af5f` | feat: drain/output-SRV cache, character-size root-pivot scaling, F12 perf v2, build + deadcode fixes |
 | `58f8618` | fix: move 2D toggle to Ctrl+F10, freeing F11 for draw capture |
 | `ff389a4` | fix: constant-bank overread cap, dead submission param, F3 shadow-bone cs validation |
+| `61c7875` | docs: change matrix through ff389a4 |
+| `1f5bab8` | feat: standalone Performance window, rigid-piece char-size pivot |
 
-## NOT IMPLEMENTED — needs action
+---
+
+## CONTINUE-LATER NOTE (session end 2026-09-04)
 
 | Item | Feasibility | Next step |
 |------|-------------|-----------|
@@ -56,7 +60,7 @@
 |-------|--------|-------|
 | `check_cvars.py` | PASS | Cvar visibility/duplication/undefined — clean |
 | `check_deadcode.py` | PASS | FIXED crash: `.count()` on a `set` tokenizer (deduped) at line 170. Added `token_counts_in()` occurrence counter. Now clean EXIT=0. |
-| `run_tests.sh` | BROKEN | Bash syntax error when invoked via `python3`. Run with `bash tests/run_tests.sh` or run Python scripts directly. |
+| `run_tests.sh` | OK | No bug — it is a bash script; it was mis-invoked via `python3`. Run with `bash tests/run_tests.sh`. |
 
 ## FILES CHANGED
 
@@ -72,4 +76,4 @@
  tests/check_deadcode.py                |  35 ++-     (false-positive elim + crash fix)
 ```
 
-Committed: `479af5f`, `58f8618`, `ff389a4`, `61c7875`. Pending: perf window v3 + rigid pivot.
+Committed: through `1f5bab8` (all source changes). Pending: none in-tree (SDK submodule dirty by design). Awaiting user verification of `1f5bab8` (perf window + rigid pivot) on host.
