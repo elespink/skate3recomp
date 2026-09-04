@@ -31,8 +31,8 @@ class NativeDebugDialog final : public rex::ui::ImGuiDialog {
   bool visible_ = false;
 };
 
-// Standalone PERF menu (F2): MangoHUD-style performance dashboard, opened
-// and closed by the F2 key. Fully independent of the F12 debug menu.
+// Standalone PERF menu (F3): MangoHUD-style performance dashboard, opened
+// and closed by the F3 key. Fully independent of the F12 debug menu.
 class PerformanceDialog final : public rex::ui::ImGuiDialog {
  public:
   explicit PerformanceDialog(rex::ui::ImGuiDrawer* drawer) : ImGuiDialog(drawer) {}

@@ -681,6 +681,15 @@ std::optional<rex::PathConfig> Skate3BaseApp::OnFinalizePaths(
 }
 
 void Skate3BaseApp::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
+  // The rexglue SDK ships three overlay hotkeys on plain function keys:
+  //   F2 = fps counter, F3 = debug overlay, F4 = settings overlay.
+  // ProcessKeyEvent feeds a key to the FIRST registered bind, and the SDK
+  // registers its binds before calling OnCreateDialogs here - so on F3/F4
+  // the SDK wins and the skate3 binds below would never fire. Repoint the
+  // SDK overlays to Ctrl+ variants so the plain F3/F4 keys are free for the
+  // skate3 PERF menu and the 2D-HUD toggle (they stay reachable).
+  rex::cvar::SetFlagByName("bind_debug_overlay", "Ctrl+F3");
+  rex::cvar::SetFlagByName("bind_settings", "Ctrl+F4");
   // Native/emulated corner readout (top right; off by default, cvar
   // skate3_native_render_mode_indicator shows it live). Input-transparent,
   // so it never affects cursor or focus handling.
@@ -727,7 +736,7 @@ void Skate3BaseApp::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
                         "Native render debug menu", [this] {
                           ToggleNativeDebug();
                         });
-  rex::ui::RegisterBind("bind_skate3_perf_menu", "F2", "Performance menu", [this] {
+  rex::ui::RegisterBind("bind_skate3_perf_menu", "F3", "Performance menu", [this] {
     TogglePerformanceWindow();
   });
   rex::ui::RegisterBind("bind_skate3_showcase", "Ctrl+Shift+B",

@@ -1,7 +1,7 @@
 # Change Matrix — Skate 3 Native Recomp
 
-**Last updated:** 2026-09-04 (late session). Committed: new PERF-menu commit (below). Uncommitted: none (SDK submodule dirty by design).
-**Base:** upstream `f6e0ae8` / v2.0.2. HEAD = PERF-menu key/menu fix (F2 perf, F4 2D).
+**Last updated:** 2026-09-05. Committed: new PERF-menu/SDK-key-conflict commit (below). Uncommitted: none (SDK submodule dirty by design).
+**Base:** upstream `f6e0ae8` / v2.0.2. HEAD = PERF-menu key/menu fix (F3 perf, F4 2D).
 **Note:** I do NOT build in the VM — the build tree is host-keyed to `lespink`. Build fixes are log-only; user verifies by compiling on the host (clang++-21).
 
 ---
@@ -16,7 +16,8 @@
 | 4 | **Perf menu refactor (v2)** | `debug_dialog.cpp` | Low | MangoHUD-style consolidated "Performance" dashboard: big colored FPS, frame-time graph w/ 1%/0.1% lows, GPU resource bars, RHI drain/view graphs, fullscreen view trace, scene stats, pacing controls. Moved RHI diag out of Diagnostics, fps-cap out of Pacing. Sun/haze dedup verified clean. |
 | 5 | **Perf window (v3) — standalone** | `debug_dialog.cpp` | Low | Perf moved OUT of the F12 debug window into a dedicated standalone "Performance" window (opened via "Open Performance window" button in F12). Consolidated: pacing (smooth camera + filter + fps cap + opaque sort), perf-log + perf-items + capture-hotkeys all into Performance. Diagnostics keeps only visual views (SSAO debug, 2D sharp). Caches untouched. |
 | 6 | **Rigid-piece char-size pivot fix** | `scene.h`, `scene.cpp`, `scene_gpu.cpp` | Medium | Rigid (non-skinned) char_family 1/2 accessories now scale their world translation about the character's root bone (bone 0 of a same-entity skinned sibling), so hats/jewellery/rigid ropa track the scaled body. Added `DrawItem::root_pos[3]` + `root_valid`. Gated on `cs != 1.0`; falls back to pre-fix when no trusted root. Inert at cs=1. |
-| 7 | **PERF = F2 key, 2D toggle = F4** | `app_common.{h,cpp}`, `debug_dialog.{h,cpp}` | Low | Performance dashboard is now its own **PERF menu opened/closed by F2** (new `PerformanceDialog`, draws independently of F12). Removed the "Open Performance window" button + perf draw call from the F12 debug window entirely — perf is fully decoupled from F12. Restored a plain function key for the 2D/APT HUD toggle: **F4** (was Ctrl+F10 since `58f8618`; the user wanted a bare function key back). `bind_skate3_perf_menu` registered/unregistered in `OnCreateDialogs`/`OnShutdown`. |
+| 7 | **PERF = F3 key, 2D toggle = F4** | `app_common.{h,cpp}`, `debug_dialog.{h,cpp}` | Low | Performance dashboard is its own **PERF menu opened/closed by F3** (new `PerformanceDialog`, draws independently of F12). Removed the "Open Performance window" button + perf draw call from the F12 debug window entirely — perf is fully decoupled from F12. Restored a plain function key for the 2D/APT HUD toggle: **F4** (was Ctrl+F10 since `58f8618`). `bind_skate3_perf_menu` registered/unregistered in `OnCreateDialogs`/`OnShutdown`. |
+| 8 | **SDK hotkey collision fix (F3/F4 actually work)** | `app_common.cpp` | Low | Root cause of "Perf removed / F4 not hiding replay HUD": the rexglue SDK ships **F2 = FPS counter, F3 = debug overlay, F4 = settings overlay** and `ProcessKeyEvent` hands a key to the FIRST registered bind — since the SDK registers before `OnCreateDialogs`, the app's F2/F4 binds never fired (F2 opened the SDK FPS counter, F4 opened/ignored the SDK settings overlay). Fix: at `OnCreateDialogs` start, `SetFlagByName("bind_debug_overlay","Ctrl+F3")` + `SetFlagByName("bind_settings","Ctrl+F4")`, freeing plain F3/F4 for the skate3 PERF menu and 2D-HUD toggle. F2 keeps the SDK FPS counter. |
 
 ## REVERTED (do not re-add as-is)
 
@@ -45,6 +46,7 @@
 | `61c7875` | docs: change matrix through ff389a4 |
 | `1f5bab8` | feat: standalone Performance window, rigid-piece char-size pivot |
 | `8a8d82c` | feat: PERF menu on F2, perf decoupled from F12, 2D HUD toggle on F4 |
+| `ce834e3` | docs: change matrix through 8a8d82c (PERF=F2, 2D=F4) |
 
 ---
 
@@ -78,6 +80,7 @@
  tests/check_deadcode.py                |  35 ++-     (false-positive elim + crash fix)
  src/skate3_app_common.{h,cpp}          |  23 ++-     (F2 PERF-menu bind + TogglePerformanceWindow + F4 2D toggle)
  src/skate3_native_debug_dialog.{h,cpp} |  75 ++-     (PerformanceDialog, F12 perf hooks removed)
+ src/skate3_app_common.cpp              |  12 ++-     (SDK hotkey remap + perf F2→F3)
 ```
 
-Committed: through latest PERF-menu commit (F2 perf, F4 2D toggle; all source changes). Pending: none in-tree (SDK submodule dirty by design). Awaiting user verification of the F2/F4 key map on host.
+Committed: through PERF-menu commits (`8a8d82c` + SDK-key fix, all source changes). Pending: none in-tree (SDK submodule dirty by design). Awaiting user verification of the F3 (PERF) / F4 (2D-HUD) / Ctrl+F3 (SDK debug) / Ctrl+F4 (SDK settings) key map on host.
