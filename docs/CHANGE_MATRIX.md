@@ -1,7 +1,7 @@
 # Change Matrix — Skate 3 Native Recomp
 
-**Last updated:** 2026-09-04 (session 3). Committed: `58f8618` (key binding). Uncommitted: none.
-**Base:** upstream `f6e0ae8` / v2.0.2. HEAD = `58f8618`.
+**Last updated:** 2026-09-04 (session 3). Committed: `ff389a4`. Uncommitted: none.
+**Base:** upstream `f6e0ae8` / v2.0.2. HEAD = `ff389a4`.
 **Note:** I do NOT build in the VM — the build tree is host-keyed to `lespink`. Build fixes are log-only; user verifies by compiling on the host (clang++-21).
 
 ---
@@ -38,6 +38,7 @@
 | `e81ad7a` | Docs: change matrix through d20d0cc |
 | `479af5f` | feat: drain/output-SRV cache, character-size root-pivot scaling, F12 perf v2, build + deadcode fixes |
 | `58f8618` | fix: move 2D toggle to Ctrl+F10, freeing F11 for draw capture |
+| `ff389a4` | fix: constant-bank overread cap, dead submission param, F3 shadow-bone cs validation |
 
 ## NOT IMPLEMENTED — needs action
 
@@ -45,15 +46,8 @@
 |------|-------------|-----------|
 | **Fix B3 (nude body preservation)** | FEASIBLE (research confirmed). `item.bones.size()/12` degenerate (always 84); real bone count at `mesh+0x48`. Per-entity grouping via `LookupCtx`. | One-frame `char_track` diagnostic dump to confirm body material, then implement per-entity max-real-bone prune in `BuildFrameScene`. |
 | **Scratch/blood body damage** | **FEASIBLE** — Path A recommended (agent C confirmed). Add wound slot to `DrawItem`, relax `AdoptDrawFetchOverrides` gate for `char_family==2`, add `overlay.w==5` wound branch in `scene_char.hlsli`. Three code paths suppress wounds but all are addressable. | F11 `.draws.bin` capture in emulated mode to confirm Path A (mesh decal) vs Path B (standalone overlay). Once confirmed, implement wound slot + shader branch (~medium effort). |
-| **Character-size shadow matching** | FEASIBLE. CSM shadow pass never applies the cvar (dead code removed). | Add bone-palette scaling to CSM shadow pass (same pattern as main pass). |
-| **Physics editor — clamp override** | FEASIBLE. Gravity constants at `0x821ae344`/`0x821a6c84` known. | `StoreGuestF32` to those addresses to override clamp range (needs runtime test). |
-| **Perf menu refinement** | IN PROGRESS. v2 Performance dashboard merged (consolidated all perf into one window, RHI graphs + fullscreen trace + scene stats + pacing). | Build was blocked at P0; once the tree compiles, verify visually. |
-| **Physics editor (reverted)** | NOT in repo (reverted — `sub_82c67f10` is NOT a registered recomp entry, it's mid-function code in a fat aggregated body). | Find the actual recomp entry wrapping that code region, or hook a real entry; verify against `PPCFuncMappings[]`. |
-| **Rigid-piece scale pivot divergence** | MAJOR (audit, NOT fixed). Non-skinned char_family 1/2 rigid pieces scale the full world transform (`constants[0..11] *= cs`) about the WORLD ORIGIN (`gpu.cpp:8983` main, `:6792` shadow) while skinned items scale bone translations about the ROOT BONE (`:6702`/`:9045`). Away from origin the pivots diverge by `(1-cs)*P` → hats/jewellery/rigid ropa drift off the scaled body. | Fix: scale rigid-piece translation row about item origin (world-space root) instead of the literal origin, mirroring the skinned path. Needs care — logged, not blindly changed. |
-| **Dead blend-index range check** | MINOR (audit). `palette_bones = item.bones.size()/12` is always 84, so the "blend index exceeds palette" warning never fires (`gpu.cpp:1163`). | Use real bone count from `mesh+0x48` (same source needed for Fix B3). Ties into Fix B3. |
-| **Constant-bank overread** | MINOR (audit). `kPaletteFloats = 84*12` reads 4092+ bytes from a 4096-byte bank; for `palette_base >= 5` the last 1–4 bone rows read past the boundary (`scene.cpp:4224`). Harmless (defensive reads, unreferenced by vertices) but non-deterministic. | Cap to `min(84, (256 - palette_base)/4) * 12`. Low-priority. |
-| **Dead `submission` param** | NIT (audit). `EvictTexStore`/`EvictCubeStore` take a `submission` argument never used; callers still compute `CurrentSubmission()` (`gpu.cpp:8001/8003`). | Remove param + drop the `CurrentSubmission()` calls. Cosmetic. |
-| **F3 shadow-bone reuse re-validation** | MINOR (audit). Shadow pass publishes only a ring offset (`:6721`) that the main pass reuses (`:9021`) without re-validating the `cs`/bones it was computed under. | Re-validate or include cs/bones in the publish. Logged. |
+| **Rigid-piece scale pivot divergence** | MAJOR (investigated). Rigid pieces (hats/jewellery/rigid ropa) have `constants[0..11] *= cs` which scales rotation/scale but NOT translation (`constants[12],[13],[14]`). Skinned items DO scale translations about root bone. Net: accessories stay fixed in world space while body scales → visible drift. Fix needs root-bone position for rigid pieces (not currently in `DrawItem`). | Read `docs/agent-reports/investigate-rigid-pivot.md` for full analysis + pseudo-code. Options: (a) look up sibling skinned item's root bone, (b) add `root_pos[3]` to `DrawItem`. Needs careful transform-math review. |
+| **Physics editor** | BLOCKED. `sub_82c67f10` is NOT a registered recomp function entry (mid-function code in fat aggregated body). | Find actual recomp entry via `PPCFuncMappings[]` or hook a different address. Research needed. |
 
 ## TEST SUITE STATUS
 
@@ -68,7 +62,8 @@
 ```
  src/skate3_app_common.cpp              |   1 +-     (Ctrl+F10 key binding)
  src/skate3_native_debug_dialog.cpp     | 396 ++-     (perf v2 + build-fix cast)
- src/skate3_native_scene_gpu.cpp        | 151 ++-     (drain fix + character-size + cast fix)
+ src/skate3_native_scene.cpp            |   3 +-     (bank overread cap)
+ src/skate3_native_scene_gpu.cpp        | 170 ++-     (drain fix + char-size + dead param + F3 cs)
  src/skate3_native_scene_gpu_internal.h |  23 +      (OutputViewEntry for drain cache)
  src/skate3_native_scene_post.cpp       |  15 +-     (EnsureMenuBlurStandalone cache)
  src/skate3_native_scene_state.h        |   1 +      (#include <fstream> build fix)
